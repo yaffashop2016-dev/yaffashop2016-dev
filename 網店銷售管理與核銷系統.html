@@ -1,0 +1,1808 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>網路平台銷售管理與分析系統</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <style>
+        @media print {
+            body * { visibility: hidden; }
+            #printArea, #printArea * { visibility: visible; }
+            #printArea { position: absolute; left: 0; top: 0; width: 80mm; padding: 5mm; }
+            .no-print { display: none; }
+        }
+        .tab-active { border-bottom: 2px solid #2563eb; color: #2563eb; }
+        body { background-color: #f8fafc; }
+        .font-mono { font-family: 'Courier New', Courier, monospace; }
+    </style>
+</head>
+<body class="p-4 md:p-8">
+    <div class="max-w-7xl mx-auto bg-white shadow-lg rounded-lg overflow-hidden">
+        <!-- Header -->
+        <div class="bg-slate-800 text-white p-6 flex justify-between items-center">
+            <div>
+                <h1 class="text-2xl font-bold">網店銷售管理與核銷系統</h1>
+                <p class="text-slate-400 text-sm mt-1">單機專業版 - 支援深度解析、進階檢貨單與動態報表</p>
+            </div>
+        </div>
+
+        <!-- Navigation Tabs -->
+        <div class="flex border-b bg-slate-50 overflow-x-auto">
+            <button onclick="switchTab('import')" id="tab-import" class="px-6 py-3 font-medium hover:bg-white tab-active whitespace-nowrap">資料匯入</button>
+            <button onclick="switchTab('manual')" id="tab-manual" class="px-6 py-3 font-medium hover:bg-white whitespace-nowrap">訂單管理</button>
+            <button onclick="switchTab('reconcile')" id="tab-reconcile" class="px-6 py-3 font-medium hover:bg-white whitespace-nowrap">批次核銷</button>
+            <button onclick="switchTab('report')" id="tab-report" class="px-6 py-3 font-medium hover:bg-white whitespace-nowrap">主管報表</button>
+            <button onclick="switchTab('backup')" id="tab-backup" class="px-6 py-3 font-medium hover:bg-white whitespace-nowrap">系統與備份管理</button>
+        </div>
+
+        <!-- Tab Contents -->
+        <div class="p-6">
+            <!-- 1. 資料匯入 -->
+            <div id="view-import" class="space-y-6">
+                <div class="border-2 border-dashed border-slate-300 rounded-lg p-8 text-center bg-slate-50">
+                    <h3 class="text-lg font-semibold mb-2">匯入平台訂單報表 (.csv / .xlsx)</h3>
+                    <p class="text-slate-500 mb-4 text-sm">系統將自動合併同訂單的商品，並解析：手續費、買家帳號、備註與各項貨號</p>
+                    <div class="flex flex-wrap gap-4 justify-center mb-4">
+                        <div class="flex flex-col">
+                            <label class="text-xs font-bold text-slate-600 mb-1">銷售平台</label>
+                            <select id="importPlatformSelect" onchange="updateImportBranchSelect()" class="border rounded p-2 text-sm"></select>
+                        </div>
+                        <div class="flex flex-col">
+                            <label class="text-xs font-bold text-slate-600 mb-1">分店名稱</label>
+                            <select id="importBranchSelect" class="border rounded p-2 text-sm">
+                                <option value="">(無)</option>
+                            </select>
+                        </div>
+                    </div>
+                    <input type="file" id="csvFile" accept=".csv, .xlsx" class="hidden" onchange="handleFileUpload(event)">
+                    <button onclick="document.getElementById('csvFile').click()" class="bg-blue-600 text-white px-8 py-3 rounded-md hover:bg-blue-700 font-bold shadow-md transition-all">選擇檔案匯入</button>
+                    <div id="importStatus" class="mt-4 text-sm font-medium"></div>
+                </div>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div class="bg-blue-50 p-4 rounded-md border border-blue-100">
+                        <h4 class="font-bold text-blue-800 mb-2">本次更新解析邏輯：</h4>
+                        <ul class="list-disc ml-5 text-xs text-blue-700 space-y-1">
+                            <li><strong>商品明細整併</strong>：同訂單編號的多項商品會自動合併於檢貨明細中。</li>
+                            <li><strong>檢貨單擴充</strong>：自動抓取「主商品貨號」、「商品選項貨號」、「買家帳號」與「買家備註」。</li>
+                            <li><strong>精準手續費</strong>：修復空值導致無法計算的問題，確實帶入「訂單編輯」中。</li>
+                        </ul>
+                    </div>
+                    <div class="bg-amber-50 p-4 rounded-md border border-amber-100">
+                        <h4 class="font-bold text-amber-800 mb-2">操作建議：</h4>
+                        <p class="text-xs text-amber-700">為保證毛利計算精確，請至「訂單管理」補上「產品成本」。您也可以在「系統與備份管理」中自訂您的銷售平台名稱。</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 2. 訂單管理 -->
+            <div id="view-manual" class="hidden space-y-4">
+                <!-- 搜尋與篩選欄 -->
+                <div class="flex flex-col gap-4 bg-slate-50 p-4 rounded-lg border">
+                    <!-- 第一行：搜尋與狀態 -->
+                    <div class="flex gap-2 flex-wrap">
+                        <input type="text" id="searchKeyword" onkeyup="renderOrderList()" placeholder="搜尋單號, 買家, 商品明細..." class="border rounded p-2 text-sm flex-1 min-w-[200px]">
+                        <select id="searchStatus" onchange="renderOrderList()" class="border rounded p-2 text-sm w-32">
+                            <option value="All">所有狀態</option>
+                            <option value="已完成">已完成</option>
+                            <option value="不成立">不成立</option>
+                            <option value="退貨/退款">退貨/退款</option>
+                            <option value="運送中">運送中</option>
+                        </select>
+                    </div>
+                    
+                    <!-- 第二行：平台、月份、日期篩選 -->
+                    <div class="flex gap-2 flex-wrap items-end">
+                        <div class="flex flex-col">
+                            <label class="text-xs font-bold text-slate-600 mb-1">銷售平台</label>
+                            <select id="searchPlatform" onchange="renderOrderList()" class="border rounded p-2 text-sm bg-blue-50 font-bold text-blue-700">
+                                <option value="All">所有平台</option>
+                            </select>
+                        </div>
+                        <div class="flex flex-col">
+                            <label class="text-xs font-bold text-slate-600 mb-1">月份篩選</label>
+                            <input type="month" id="searchMonth" onchange="renderOrderList()" class="border rounded p-2 text-sm">
+                        </div>
+                        <div class="flex flex-col">
+                            <label class="text-xs font-bold text-slate-600 mb-1">開始日期</label>
+                            <input type="date" id="searchDateFrom" onchange="renderOrderList()" class="border rounded p-2 text-sm">
+                        </div>
+                        <div class="flex flex-col">
+                            <label class="text-xs font-bold text-slate-600 mb-1">結束日期</label>
+                            <input type="date" id="searchDateTo" onchange="renderOrderList()" class="border rounded p-2 text-sm">
+                        </div>
+                        <div class="flex flex-col flex-1 min-w-[250px]">
+                            <label class="text-xs font-bold text-slate-600 mb-1">分店名稱篩選 <span class="text-purple-500">(可複選)</span></label>
+                            <div id="branchFilterContainer" class="border rounded p-2 bg-white max-h-20 overflow-y-auto flex flex-wrap gap-1 items-center content-start"></div>
+                        </div>
+                    </div>
+                    
+                    <!-- 第三行：新增按鈕與篩選操作 -->
+                    <div class="flex gap-2 justify-between items-center">
+                        <div class="flex gap-2">
+                            <button onclick="clearFilters()" class="bg-slate-400 text-white px-3 py-2 rounded-md hover:bg-slate-500 font-bold text-sm">清除篩選</button>
+                            <span id="filterResultCount" class="text-sm text-slate-600 font-bold"></span>
+                        </div>
+                        <button onclick="showOrderModal()" class="bg-green-600 text-white px-4 py-2 rounded-md hover:bg-green-700 font-bold shadow whitespace-nowrap">+ 手動新增訂單</button>
+                    </div>
+                </div>
+                <div class="overflow-x-auto border rounded-lg">
+                    <table class="min-w-full divide-y divide-gray-200">
+                        <thead class="bg-gray-50 text-xs text-gray-500 uppercase">
+                            <tr>
+                                <th class="px-4 py-3 text-left">日期</th>
+                                <th class="px-4 py-3 text-left">訂單編號 / 買家</th>
+                                <th class="px-4 py-3 text-right">商品總額</th>
+                                <th class="px-4 py-3 text-right">平台扣費</th>
+                                <th class="px-4 py-3 text-right">應收金額</th>
+                                <th class="px-4 py-3 text-center">狀態</th>
+                                <th class="px-4 py-3 text-center">核銷</th>
+                                <th class="px-4 py-3 text-center">操作</th>
+                            </tr>
+                        </thead>
+                        <tbody id="orderList" class="divide-y divide-gray-200 text-sm"></tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- 3. 批次核銷 -->
+            <div id="view-reconcile" class="hidden space-y-6">
+                <h3 class="text-xl font-bold">待入帳訂單核銷</h3>
+                <!-- 篩選工具：平台 / 年月 / 訂單編號 -->
+                <div class="flex gap-2 flex-wrap items-end mb-2">
+                    <div class="flex flex-col">
+                        <label class="text-xs font-bold text-slate-600 mb-1">平台</label>
+                        <select id="reconcilePlatformFilter" onchange="renderReconcileList()" class="border rounded p-2 text-sm w-40">
+                            <option value="All">所有平台</option>
+                        </select>
+                    </div>
+                    <div class="flex flex-col">
+                        <label class="text-xs font-bold text-slate-600 mb-1">年/月</label>
+                        <input type="month" id="reconcileMonth" onchange="renderReconcileList()" class="border rounded p-2 text-sm w-44">
+                    </div>
+                    <div class="flex flex-col">
+                        <label class="text-xs font-bold text-slate-600 mb-1">訂單編號</label>
+                        <input type="text" id="reconcileOrderId" oninput="renderReconcileList()" placeholder="輸入或部分單號" class="border rounded p-2 text-sm w-56">
+                    </div>
+                    <div class="flex items-end">
+                        <button onclick="clearReconcileFilters()" class="bg-slate-400 text-white px-3 py-2 rounded-md hover:bg-slate-500 font-bold text-sm">清除篩選</button>
+                    </div>
+                </div>
+
+                <div class="bg-orange-50 p-4 border border-orange-200 rounded-md flex flex-wrap gap-4 items-end">
+                    <div class="w-40">
+                        <label class="block text-xs font-bold mb-1">本次提領手續費</label>
+                        <input type="number" id="batchWireFee" value="0" class="w-full border rounded p-2">
+                    </div>
+                    <div class="w-40">
+                        <label class="block text-xs font-bold mb-1">實際入帳日期</label>
+                        <input type="date" id="batchIncomeDate" class="w-full border rounded p-2">
+                    </div>
+                    <div class="w-56">
+                        <label class="block text-xs font-bold mb-1">共用發票號 (填寫後將套用至所選)</label>
+                        <input type="text" id="batchInvoiceNumber" placeholder="可留空使用個別欄位" class="w-full border rounded p-2 text-sm">
+                    </div>
+                    <button onclick="applyBatchReconcile()" class="bg-orange-600 text-white px-6 py-2 rounded-md hover:bg-orange-700 font-bold">執行批次核銷</button>
+                    <div class="text-xs text-orange-700 ml-auto bg-white p-2 border border-orange-200 rounded">
+                        已選取: <span id="selectedCount" class="font-bold text-lg">0</span> 筆 | 
+                        平台費: <span id="selectedPlatformFee" class="font-bold text-lg text-red-500">$0</span> | 
+                        小計應收: <span id="selectedAmount" class="font-bold text-lg">$0</span>
+                    </div>
+                </div>
+                <div class="overflow-x-auto border rounded-lg">
+                    <table class="min-w-full divide-y divide-gray-200">
+                        <thead class="bg-gray-50 text-xs font-medium text-gray-500 uppercase">
+                            <tr>
+                                <th class="px-4 py-2"><input type="checkbox" id="selectAll" onchange="toggleSelectAll()"></th>
+                                <th class="px-4 py-2 text-left">訂單編號</th>
+                                <th class="px-4 py-2 text-right">商品額</th>
+                                <th class="px-4 py-2 text-right">平台費</th>
+                                <th class="px-4 py-2 text-right">預計應收</th>
+                                <th class="px-4 py-2 text-center">進項發票號碼</th>
+<th class="px-4 py-2 text-center">進項發票日期</th>
+                            </tr>
+                        </thead>
+                        <tbody id="reconcileList" class="divide-y divide-gray-200 text-sm"></tbody>
+                    </table>
+                </div>
+                <!-- reconcile history section -->
+                <div id="reconcileHistorySection" class="mt-6">
+                    <h4 class="text-lg font-bold">核銷歷史</h4>
+                    <div id="reconcileHistoryContainer" class="overflow-x-auto border rounded-lg mt-2"></div>
+                </div>
+            </div>
+
+            <!-- 4. 主管報表 -->
+            <div id="view-report" class="hidden space-y-6">
+                <div class="flex justify-between items-center bg-slate-50 p-4 rounded-lg border">
+                    <div class="flex flex-wrap items-center gap-3">
+                            <label class="font-bold text-slate-700 text-sm">平台篩選檢視：</label>
+                            <select id="reportPlatformFilter" onchange="renderReports()" class="border rounded p-2 w-48 text-sm font-bold text-blue-700"></select>
+                            <label class="font-bold text-slate-700 text-sm">分店篩選：</label>
+                            <select id="reportBranchFilter" onchange="renderReports()" class="border rounded p-2 w-48 text-sm font-bold text-blue-700"></select>
+                            <label class="font-bold text-slate-700 text-sm">年度：</label>
+                            <select id="reportYearFilter" onchange="renderReports()" class="border rounded p-2 w-32 text-sm"></select>
+                            <label class="font-bold text-slate-700 text-sm">月份：</label>
+                            <select id="reportMonthFilter" onchange="renderReports()" class="border rounded p-2 w-24 text-sm"></select>
+                            <label class="font-bold text-slate-700 text-sm">關鍵字：</label>
+                            <input type="text" id="reportKeyword" oninput="renderReports()" placeholder="訂單/買家" class="border rounded p-2 text-sm w-48">
+                        </div>
+                    <button onclick="exportReportToExcel()" class="bg-emerald-600 text-white px-5 py-2 rounded-md hover:bg-emerald-700 font-bold flex items-center gap-2 shadow">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
+                        匯出報表 (.xlsx)
+                    </button>
+                </div>
+
+                <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+                    <div class="bg-blue-50 border border-blue-200 p-5 rounded-lg shadow-sm">
+                        <p class="text-blue-600 text-sm font-bold mb-1">銷售總額 (有效)</p>
+                        <h2 id="stat-sales" class="text-2xl font-black text-blue-900">$0</h2>
+                    </div>
+                    <div class="bg-red-50 border border-red-200 p-5 rounded-lg shadow-sm">
+                        <p class="text-red-600 text-sm font-bold mb-1">平台總費用</p>
+                        <h2 id="stat-fees" class="text-2xl font-black text-red-900">$0</h2>
+                    </div>
+                    <div class="bg-slate-50 border border-slate-300 p-5 rounded-lg shadow-sm">
+                        <p class="text-slate-600 text-sm font-bold mb-1">估算產品總成本</p>
+                        <h2 id="stat-cost" class="text-2xl font-black text-slate-900">$0</h2>
+                    </div>
+                    <div class="bg-green-50 border border-green-300 p-5 rounded-lg shadow-sm">
+                        <p class="text-green-700 text-sm font-bold mb-1">預估毛利 (扣除成本與費用)</p>
+                        <h2 id="stat-profit" class="text-2xl font-black text-green-900">$0</h2>
+                    </div>
+                </div>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div class="bg-white p-4 border rounded-lg shadow-sm">
+                        <h4 class="font-bold mb-4 text-sm text-center">月度銷售趨勢</h4>
+                        <canvas id="salesChart"></canvas>
+                    </div>
+                    <div class="bg-white p-4 border rounded-lg shadow-sm">
+                        <h4 class="font-bold mb-4 text-sm text-center">平台佔比 (銷售額)</h4>
+                        <canvas id="platformChart"></canvas>
+                    </div>
+                </div>
+                <div id="reportPendingSummary" class="bg-white border rounded-lg p-4 shadow-sm mb-4">
+                    <!-- 各平台未入帳統計將注入此處 -->
+                </div>
+                <div id="reportRecentOrders" class="bg-white border rounded-lg p-4 shadow-sm">
+                    <!-- Recent orders with invoice info will be injected here -->
+                </div>
+            </div>
+
+            <!-- 5. 備份與管理 -->
+            <div id="view-backup" class="hidden space-y-6">
+                <!-- Platform Management -->
+                <div class="bg-blue-50 p-6 border border-blue-100 rounded-lg shadow-sm">
+                    <h3 class="text-lg font-bold mb-4 text-blue-900">平台清單管理</h3>
+                    <p class="text-sm text-blue-700 mb-4">自訂您目前經營的銷售平台，這些選項會連動到「訂單編輯」與「主管報表」的篩選中。</p>
+                    <div class="flex gap-2 max-w-md mb-4">
+                        <input type="text" id="newPlatformName" placeholder="輸入新平台名稱 (例: TikTok)" class="border rounded p-2 flex-1 text-sm">
+                        <button onclick="addPlatform()" class="bg-blue-600 text-white px-4 py-2 rounded font-bold hover:bg-blue-700">新增</button>
+                    </div>
+                    <div id="platformListContainer" class="flex flex-wrap gap-2">
+                        <!-- Rendered dynamically -->
+                    </div>
+                </div>
+
+                <!-- Branch list management -->
+                <div class="bg-purple-50 p-6 border border-purple-100 rounded-lg shadow-sm">
+                    <h3 class="text-lg font-bold mb-4 text-purple-800">分店名稱管理</h3>
+                    <p class="text-sm text-purple-700 mb-4">針對每個平台定義可選擇的分店名稱，這些選項會在「訂單編輯」與「主管報表」中以下拉清單呈現。</p>
+                    <div class="flex gap-2 max-w-md mb-4 items-end">
+                        <div class="flex flex-col">
+                            <label class="text-xs font-bold mb-1">平台</label>
+                            <select id="branchPlatformSelect" class="border rounded p-2 text-sm"></select>
+                        </div>
+                        <input type="text" id="newBranchName" placeholder="輸入分店名稱 (例: 台北中山店)" class="border rounded p-2 flex-1 text-sm">
+                        <button onclick="addBranch()" class="bg-purple-600 text-white px-4 py-2 rounded font-bold hover:bg-purple-700">新增</button>
+                    </div>
+                    <div id="branchListContainer" class="flex flex-wrap gap-2">
+                        <!-- Rendered dynamically -->
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div class="bg-white p-6 border rounded-lg shadow-sm">
+                        <h3 class="text-lg font-bold mb-4">系統資料備份</h3>
+                        <p class="text-sm text-slate-500 mb-4">定期匯出 JSON 備份檔以防資料遺失，也可作為跨裝置轉移使用。</p>
+                        <div class="flex flex-col gap-3">
+                            <button onclick="exportData()" class="bg-slate-800 text-white px-6 py-3 rounded-md hover:bg-slate-900 font-bold text-center">下載完整備份檔 (.json)</button>
+                            <button onclick="document.getElementById('importBackupFile').click()" class="bg-white text-slate-700 px-6 py-3 rounded-md border-2 border-slate-300 hover:bg-slate-50 font-bold text-center">回復備份檔</button>
+                            <input type="file" id="importBackupFile" accept=".json" class="hidden" onchange="importBackup(event)">
+                        </div>
+                    </div>
+                    <div class="bg-white p-6 border rounded-lg shadow-sm">
+                        <h3 class="text-lg font-bold mb-4">XLSX 資料備份 (便捷編輯)</h3>
+                        <p class="text-sm text-slate-500 mb-4">支援將訂單資料匯出為 XLSX，可在 Excel 或試算表工具中編輯，再匯回系統。</p>
+                        <div class="flex flex-col gap-3">
+                            <button onclick="exportDataToXLSX()" class="bg-emerald-600 text-white px-6 py-3 rounded-md hover:bg-emerald-700 font-bold text-center">匯出訂單資料 (.xlsx)</button>
+                            <button onclick="document.getElementById('importXLSXFile').click()" class="bg-white text-emerald-700 px-6 py-3 rounded-md border-2 border-emerald-300 hover:bg-emerald-50 font-bold text-center">匯入 XLSX 資料</button>
+                            <input type="file" id="importXLSXFile" accept=".xlsx" class="hidden" onchange="importDataFromXLSX(event)">
+                        </div>
+                    </div>
+                    <div class="bg-purple-50 p-6 border border-purple-200 rounded-lg shadow-sm">
+                        <h3 class="text-lg font-bold text-purple-800 mb-4">出貨檢貨單自訂</h3>
+                        <p class="text-sm text-purple-600 mb-4">自訂出貨檢貨單的表頭與表尾内容，會在列印時自動加入。</p>
+                        <div class="flex flex-col gap-3">
+                            <div>
+                                <label class="block text-xs font-bold text-gray-600 mb-1">表頭文字</label>
+                                <input type="text" id="slipHeader" placeholder="例: 感謝惠顧！歡迎再次光臨" class="border rounded p-2 w-full text-sm" maxlength="100">
+                            </div>
+                            <div>
+                                <label class="block text-xs font-bold text-gray-600 mb-1">表尾文字</label>
+                                <input type="text" id="slipFooter" placeholder="例: 本公司持續優化服務品質" class="border rounded p-2 w-full text-sm" maxlength="100">
+                            </div>
+                            <button onclick="saveSlipCustomization()" class="bg-purple-600 text-white px-6 py-2 rounded-md hover:bg-purple-700 font-bold text-center">保存設定</button>
+                        </div>
+                    </div>
+                    <div class="bg-red-50 p-6 border border-red-200 rounded-lg shadow-sm">
+                        <h3 class="text-lg font-bold text-red-800 mb-2">危險操作區</h3>
+                        <p class="text-sm text-red-600 mb-4">這將徹底移除瀏覽器內存儲的所有訂單與對帳紀錄，操作後無法復原。</p>
+                        <button onclick="clearAllData()" class="bg-red-600 text-white px-6 py-3 rounded-md hover:bg-red-700 font-bold w-full mt-4">清空所有系統資料</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal for Order -->
+    <div id="orderModal" class="fixed inset-0 bg-black bg-opacity-50 hidden flex items-center justify-center p-4 z-50">
+        <div class="bg-white rounded-lg w-full max-w-3xl p-6 shadow-2xl max-h-[90vh] overflow-y-auto">
+            <h2 class="text-xl font-bold mb-4 border-b pb-2 text-blue-800">訂單明細編輯</h2>
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <!-- Row 1 -->
+                <div>
+                    <label class="block text-xs font-bold text-gray-500 uppercase mb-1">訂單編號</label>
+                    <input type="text" id="m_id" class="w-full border rounded p-2 bg-slate-50 font-mono">
+                </div>
+                <div>
+                    <label class="block text-xs font-bold text-gray-500 uppercase mb-1">銷售平台</label>
+                    <select id="m_platform" class="w-full border rounded p-2 bg-blue-50"></select>
+                </div>
+                <div>
+                    <label class="block text-xs font-bold text-gray-500 uppercase mb-1">訂單狀態</label>
+                    <select id="m_status" class="w-full border rounded p-2">
+                        <option value="已完成">已完成</option>
+                        <option value="不成立">不成立</option>
+                        <option value="退貨/退款">退貨/退款</option>
+                        <option value="運送中">運送中</option>
+                    </select>
+                </div>
+                
+                <!-- Row 2 -->
+                <div>
+                    <label class="block text-xs font-bold text-gray-500 uppercase mb-1">商品總額 (應收)</label>
+                    <input type="number" id="m_price" class="w-full border rounded p-2 font-bold text-blue-700">
+                </div>
+                <div>
+                    <label class="block text-xs font-bold text-red-500 uppercase mb-1">平台扣費總計</label>
+                    <input type="number" id="m_platformFee" class="w-full border-red-300 border rounded p-2 font-bold text-red-600">
+                </div>
+                <div>
+                    <label class="block text-xs font-bold text-yellow-600 uppercase mb-1">產品成本</label>
+                    <input type="number" id="m_cost" class="w-full border-yellow-300 border rounded p-2 font-bold text-yellow-700">
+                </div>
+                <div>
+                    <label class="block text-xs font-bold text-green-600 uppercase mb-1">訂單日期</label>
+                    <input type="date" id="m_orderDate" class="w-full border-green-300 border rounded p-2 font-bold text-green-700">
+                </div>
+
+                <!-- Row 3 (New Fields) -->
+                <div class="md:col-span-1">
+                    <label class="block text-xs font-bold text-gray-500 uppercase mb-1">買家帳號</label>
+                    <input type="text" id="m_buyerAccount" class="w-full border rounded p-2">
+                </div>
+                <div class="md:col-span-1">
+                    <label class="block text-xs font-bold text-purple-500 uppercase mb-1">分店名稱 <span class="text-xs text-purple-600">(可選)</span></label>
+                    <input list="branchList" type="text" id="m_branch" class="w-full border border-purple-200 rounded p-2 bg-purple-50" placeholder="例：台北中山店">
+                    <datalist id="branchList"></datalist>
+                </div>
+                <div class="md:col-span-1">
+                    <label class="block text-xs font-bold text-gray-500 uppercase mb-1">寄送方式</label>
+                    <input type="text" id="m_shippingMethod" class="w-full border rounded p-2" placeholder="例：黑貓">
+                </div>
+                <div class="md:col-span-1">
+                    <label class="block text-xs font-bold text-gray-500 uppercase mb-1">包裹查詢號碼</label>
+                    <input type="text" id="m_trackingNumber" class="w-full border rounded p-2 font-mono" placeholder="e.g.: 12345678">
+                </div>
+
+                <div class="md:col-span-1">
+                    <label class="block text-xs font-bold text-gray-500 uppercase mb-1">商品選項名稱</label>
+                    <input type="text" id="m_optionName" class="w-full border rounded p-2" placeholder="例：紅色/大尺寸">
+                </div>
+                <div class="md:col-span-2">
+                    <label class="block text-xs font-bold text-gray-500 uppercase mb-1">買家備註 (供檢貨參考)</label>
+                    <input type="text" id="m_buyerRemark" class="w-full border rounded p-2 text-red-600">
+                </div>
+
+                <div class="md:col-span-1">
+                    <label class="block text-xs font-bold text-gray-500 uppercase mb-1">銷項發票號碼</label>
+                    <input type="text" id="m_invoiceNum" class="w-full border rounded p-2 font-mono text-sm" placeholder="可留空">
+                </div>
+                <div class="md:col-span-1">
+                    <label class="block text-xs font-bold text-gray-500 uppercase mb-1">銷項發票日期</label>
+                    <input type="date" id="m_invoiceDate" class="w-full border rounded p-2 text-sm">
+                </div>
+                <div class="md:col-span-1">
+                    <label class="block text-xs font-bold text-gray-500 uppercase mb-1">進項發票號碼</label>
+                    <input type="text" id="m_incomingInvoiceNum" class="w-full border rounded p-2 font-mono text-sm" placeholder="核銷手續費發票">
+                </div>
+                <div class="md:col-span-1">
+                    <label class="block text-xs font-bold text-gray-500 uppercase mb-1">進項發票日期</label>
+                    <input type="date" id="m_incomingInvoiceDate" class="w-full border rounded p-2 text-sm">
+                </div>
+
+                <!-- Row 4 -->
+                <div class="md:col-span-3">
+                    <label class="block text-xs font-bold text-gray-500 uppercase mb-1">詳細商品內容 (檢貨單列印用)</label>
+                    <textarea id="m_items" class="w-full border rounded p-2 font-mono text-sm leading-relaxed bg-slate-50" rows="5" placeholder="商品A x 1 (主號:A01 / 選項:紅)&#10;商品B x 2 (主號:B02 / 選項:大)"></textarea>
+                </div>
+            </div>
+            <div class="mt-6 flex justify-end gap-3 border-t pt-4">
+                <button onclick="hideOrderModal()" class="px-6 py-2 text-slate-600 border rounded font-bold hover:bg-slate-100">取消</button>
+                <button onclick="saveManualOrder()" class="px-8 py-2 bg-blue-600 text-white rounded font-bold shadow hover:bg-blue-700">儲存訂單紀錄</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal for Reconcile History Editing -->
+    <div id="historyModal" class="fixed inset-0 bg-black bg-opacity-50 hidden flex items-center justify-center p-4 z-50">
+        <div class="bg-white rounded-lg w-full max-w-2xl p-6 shadow-lg max-h-[80vh] overflow-y-auto">
+            <h3 class="text-lg font-bold mb-4">編輯核銷紀錄</h3>
+            <div id="historyModalContent" class="space-y-2"></div>
+            <div class="flex justify-end gap-2 mt-4">
+                <button onclick="hideHistoryModal()" class="px-4 py-2 border rounded">取消</button>
+                <button onclick="saveHistoryModal()" class="px-4 py-2 bg-blue-600 text-white rounded">儲存變更</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Print Area (Thermal 80mm) -->
+    <div id="printArea" class="hidden">
+        <div style="text-align: center; margin-bottom: 5px;">
+            <h2 style="font-size: 1.4rem; font-weight: 900; margin: 0; padding: 0;">出貨檢貨單</h2>
+            <p style="font-size: 0.8rem; margin: 2px 0 0 0;" id="p_platform"></p>
+            <p style="font-size: 0.75rem; margin: 1px 0 0 0;" id="p_headerExtra"></p>
+        </div>
+        
+        <hr style="border: 0; border-top: 2px solid #000; margin: 8px 0;">
+        
+        <div style="font-size: 0.95rem; line-height: 1.5; font-weight: bold;">
+            <p style="margin: 0;">單號: <span id="p_id" style="font-family: monospace;"></span></p>
+            <p style="margin: 0;">買家: <span id="p_buyer"></span></p>
+            <p style="margin: 0;">日期: <span id="p_date"></span></p>
+            <p style="margin: 0;" id="p_shipping_container" style="display: none;">寄送: <span id="p_shipping"></span> / <span id="p_tracking"></span></p>
+            <!-- ✅ 新增商品選項名稱顯示 -->
+            <p style="margin: 0;">商品選項名稱: <span id="p_optionName"></span></p>
+        </div>
+        
+        <div id="p_remark_container" style="display: none; margin-top: 8px; border: 1px dashed #000; padding: 4px; border-radius: 4px;">
+            <strong style="font-size: 0.85rem;">買家備註:</strong>
+            <p id="p_remark" style="margin: 0; font-size: 0.9rem; font-weight: bold;"></p>
+        </div>
+
+        <div style="margin-top: 10px;">
+            <div style="background-color: #000; color: #fff; text-align: center; font-size: 0.9rem; font-weight: bold; padding: 2px 0; margin-bottom: 5px;">
+                商 品 檢 貨 明 細
+            </div>
+            <div id="p_items" style="font-size: 0.9rem; white-space: pre-wrap; font-weight: bold; line-height: 1.6;"></div>
+        </div>
+
+        <hr style="border: 0; border-top: 2px dashed #000; margin: 15px 0 10px 0;">
+        
+        <div style="text-align: right; font-size: 1rem; font-weight: 900;">
+            代收/應收總額: $<span id="p_total"></span>
+        </div>
+        <div style="text-align: center; font-size: 0.7rem; margin-top: 15px; color: #333;">
+            <span id="printTime"></span>
+        </div>
+        <div style="text-align: center; font-size: 0.7rem; margin-top: 5px; color: #333;" id="p_footerExtra"></div>
+    </div>
+
+    <script>
+        // Data Structure & State
+        let orders = JSON.parse(localStorage.getItem('oms_orders_v2') || '[]');
+        let platforms = JSON.parse(localStorage.getItem('oms_platforms') || '["Shopee", "Momo", "Official", "Other"]');
+        // branches keyed by platform to support per-platform branch/店名管理
+        let branches = JSON.parse(localStorage.getItem('oms_branches') || '{}');
+        // history of batch reconciliations (for audit/edit)
+        let reconcileHistory = JSON.parse(localStorage.getItem('oms_reconcileHistory') || '[]');
+        let salesChart = null;
+        let platformChart = null;
+
+        function saveToStorage() {
+            localStorage.setItem('oms_orders_v2', JSON.stringify(orders));
+        }
+        function saveReconcileHistory() {
+            localStorage.setItem('oms_reconcileHistory', JSON.stringify(reconcileHistory));
+        }
+        function savePlatforms() {
+            localStorage.setItem('oms_platforms', JSON.stringify(platforms));
+            // when platforms change, keep branches in sync
+            platforms.forEach(p => { if (!branches[p]) branches[p] = []; });
+            renderPlatformSelects();
+            renderImportControls();
+            renderBranchPlatformSelects();
+            renderBranchManager();
+        }
+
+        // --- Core Navigation & Initialization ---
+        function initApp() {
+            // ensure branches object has arrays for every platform
+            platforms.forEach(p => { if (!branches[p]) branches[p] = []; });
+            renderPlatformSelects();
+            renderPlatformManager();
+            renderImportControls();
+            renderBranchPlatformSelects();
+            renderBranchManager();
+            renderOrderList();
+            loadSlipCustomization();
+        }
+
+        function switchTab(tabId) {
+            ['import', 'manual', 'reconcile', 'report', 'backup'].forEach(t => {
+                document.getElementById('view-' + t).classList.add('hidden');
+                document.getElementById('tab-' + t).classList.remove('tab-active');
+            });
+            document.getElementById('view-' + tabId).classList.remove('hidden');
+            document.getElementById('tab-' + tabId).classList.add('tab-active');
+            
+            if (tabId === 'manual') renderOrderList();
+            if (tabId === 'reconcile') {
+                renderReconcileList();
+                renderReconcileHistory();
+            }
+            if (tabId === 'report') renderReports();
+            if (tabId === 'backup') renderPlatformManager();
+        }
+
+        // --- Platform & Branch Management ---
+        function renderPlatformSelects() {
+            const mSelect = document.getElementById('m_platform');
+            const rSelect = document.getElementById('reportPlatformFilter');
+            const importSelect = document.getElementById('importPlatformSelect');
+            const branchPlatSelect = document.getElementById('branchPlatformSelect');
+            
+            let optionsHTML = '';
+            platforms.forEach(p => { optionsHTML += `<option value="${p}">${p}</option>`; });
+            
+            mSelect && (mSelect.innerHTML = optionsHTML);
+            rSelect && (rSelect.innerHTML = `<option value="All">全部平台總覽</option>` + optionsHTML);
+            importSelect && (importSelect.innerHTML = optionsHTML);
+            branchPlatSelect && (branchPlatSelect.innerHTML = optionsHTML);
+            // after rendering platforms, refresh branch dropdowns
+            updateImportBranchSelect();
+            renderBranchPlatformSelects();
+        }
+
+        function renderPlatformManager() {
+            const container = document.getElementById('platformListContainer');
+            container.innerHTML = '';
+            platforms.forEach((p, idx) => {
+                container.innerHTML += `
+                    <div class="bg-white border border-blue-200 px-3 py-1.5 rounded flex items-center gap-2 shadow-sm text-sm font-bold text-slate-700">
+                        ${p}
+                        <button onclick="removePlatform(${idx})" class="text-red-400 hover:text-red-600 font-normal ml-2">×</button>
+                    </div>
+                `;
+            });
+        }
+
+        // --- Branch Management ---
+        function saveBranches() {
+            localStorage.setItem('oms_branches', JSON.stringify(branches));
+            renderBranchPlatformSelects();
+            renderBranchManager();
+            renderImportControls();
+            // update filter in case manual view is active
+            renderBranchFilter();
+        }
+
+        function updateModalBranchList() {
+            const plat = document.getElementById('m_platform').value;
+            const datalist = document.getElementById('branchList');
+            if (!datalist) return;
+            datalist.innerHTML = '';
+            (branches[plat] || []).forEach(b => {
+                datalist.innerHTML += `<option value="${b}">`;
+            });
+        }
+
+        function renderBranchPlatformSelects() {
+            const branchPlatSelect = document.getElementById('branchPlatformSelect');
+            const importPlatSelect = document.getElementById('importPlatformSelect');
+            const reportPlatSelect = document.getElementById('reportPlatformFilter');
+            if (!branchPlatSelect && !importPlatSelect && !reportPlatSelect) return;
+            let optionsHTML = '';
+            platforms.forEach(p => { optionsHTML += `<option value="${p}">${p}</option>`; });
+            branchPlatSelect && (branchPlatSelect.innerHTML = optionsHTML);
+            importPlatSelect && (importPlatSelect.innerHTML = optionsHTML);
+            reportPlatSelect && (reportPlatSelect.innerHTML = `<option value="All">全部平台總覽</option>` + optionsHTML);
+        }
+
+        function renderBranchManager() {
+            const container = document.getElementById('branchListContainer');
+            if (!container) return;
+            container.innerHTML = '';
+            platforms.forEach(p => {
+                const list = branches[p] || [];
+                if (list.length === 0) return;
+                container.innerHTML += `<h4 class="font-bold text-blue-800 mt-4">${p} 分店列表</h4>`;
+                list.forEach((b, idx) => {
+                    container.innerHTML += `
+                    <div class="bg-white border border-blue-200 px-3 py-1.5 rounded flex items-center gap-2 shadow-sm text-sm font-bold text-slate-700">
+                        ${b}
+                        <button onclick="removeBranch('${p}', ${idx})" class="text-red-400 hover:text-red-600 font-normal ml-2">×</button>
+                    </div>
+                `;
+                });
+            });
+        }
+
+        function renderImportControls() {
+            const plat = document.getElementById('importPlatformSelect');
+            const branchSel = document.getElementById('importBranchSelect');
+            if (!plat || !branchSel) return;
+            const selected = plat.value;
+            branchSel.innerHTML = '<option value="">(無)</option>';
+            if (branches[selected]) {
+                branches[selected].forEach(b => {
+                    branchSel.innerHTML += `<option value="${b}">${b}</option>`;
+                });
+            }
+        }
+
+        function updateImportBranchSelect() {
+            renderImportControls();
+        }
+
+        function addBranch() {
+            const plat = document.getElementById('branchPlatformSelect').value;
+            const name = document.getElementById('newBranchName').value.trim();
+            if (!plat || !name) return;
+            branches[plat] = branches[plat] || [];
+            if (!branches[plat].includes(name)) {
+                branches[plat].push(name);
+                saveBranches();
+                document.getElementById('newBranchName').value = '';
+            }
+        }
+
+        function removeBranch(platform, idx) {
+            if (branches[platform] && branches[platform].length > idx) {
+                branches[platform].splice(idx,1);
+                saveBranches();
+            }
+        }
+
+        function addPlatform() {
+            const val = document.getElementById('newPlatformName').value.trim();
+            if (val && !platforms.includes(val)) {
+                platforms.push(val);
+                savePlatforms();
+                document.getElementById('newPlatformName').value = '';
+                renderPlatformManager();
+            }
+        }
+
+        function removePlatform(idx) {
+            if (platforms.length <= 1) return alert("最少需要保留一個平台");
+            if (confirm(`確定要刪除平台 "${platforms[idx]}"？ (現有訂單的平台標記不會被刪除)`)) {
+                const removed = platforms.splice(idx, 1)[0];
+                // also drop branches for this platform
+                delete branches[removed];
+                savePlatforms();
+                saveBranches();
+                renderPlatformManager();
+            }
+        }
+
+        // --- CSV/Excel Import & Parsing ---
+        function parseAmt(val) {
+            if (typeof val === 'number') return val;
+            if (!val) return 0;
+            const clean = val.toString().replace(/,/g, '').trim();
+            const num = parseFloat(clean);
+            return isNaN(num) ? 0 : num;
+        }
+
+        async function handleFileUpload(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+            document.getElementById('importStatus').innerHTML = "<span class='text-blue-600'>讀取解析中...</span>";
+
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                const data = new Uint8Array(e.target.result);
+                const workbook = XLSX.read(data, { type: 'array' });
+                const firstSheetName = workbook.SheetNames[0];
+                const worksheet = workbook.Sheets[firstSheetName];
+                const jsonData = XLSX.utils.sheet_to_json(worksheet);
+                processPlatformData(jsonData);
+            };
+            reader.readAsArrayBuffer(file);
+            document.getElementById('csvFile').value = '';
+        }
+
+        function processPlatformData(data) {
+            let added = 0;
+            let skipped = 0;
+            const tempOrders = {};
+            const importPlat = document.getElementById('importPlatformSelect').value;
+            const importBranch = document.getElementById('importBranchSelect').value || '';
+
+            data.forEach(row => {
+                const id = row['訂單編號'] || row['Order ID'];
+                if (!id) return;
+
+                const price = parseAmt(row['商品總價'] || row['買家總支付金額']);
+                const fee_comm = parseAmt(row['成交手續費']);
+                const fee_service = parseAmt(row['其他服務費']);
+                const fee_pay = parseAmt(row['金流與系統處理費']);
+                
+                const itemName = row['商品名稱'] || '未命名商品';
+                const qty = row['數量'] || 1;
+                const mainSku = row['主商品貨號'] || '-';
+                const varSku = row['商品選項貨號'] || '-';
+                const optionName = row['商品選項名稱'] || row['商品選項'] || '';
+                
+                const itemStr = `[${qty}件] ${itemName}\n ↳ 主號:${mainSku} / 選項:${varSku}`;
+
+                if (!tempOrders[id]) {
+                    tempOrders[id] = {
+                        id: id,
+                        date: row['訂單成立日期'] ? row['訂單成立日期'].split(' ')[0] : new Date().toISOString().split('T')[0],
+                        platform: importPlat || platforms[0],
+                        branch: importBranch || row['店名'] || row['分店'] || '',
+                        status: row['訂單狀態'] || '已完成',
+                        price: price,
+                        platformFee: fee_comm + fee_service + fee_pay,
+                        cost: 0,
+                        shippingMethod: row['寄送方式'] || row['出貨方式'] || '',
+                        trackingNumber: row['包裹查詢號碼'] || row['追蹤號碼'] || row['物流單號'] || '',
+                        optionName: optionName,
+                        itemsArray: [itemStr],
+                        buyerAccount: row['買家帳號'] || '',
+                        buyerRemark: row['買家備註'] || '',
+                        reconciled: false,
+                        invoiceNum: '',
+                        actualIncomeDate: '',
+                        wireFee: 0
+                    };
+                } else {
+                    tempOrders[id].itemsArray.push(itemStr);
+                    tempOrders[id].price = Math.max(tempOrders[id].price, price);
+                    tempOrders[id].platformFee = Math.max(tempOrders[id].platformFee, fee_comm + fee_service + fee_pay);
+                    
+                    if (row['買家備註']) tempOrders[id].buyerRemark = row['買家備註'];
+                    if (row['寄送方式'] || row['出貨方式']) tempOrders[id].shippingMethod = row['寄送方式'] || row['出貨方式'];
+                    if (row['包裹查詢號碼'] || row['追蹤號碼']) tempOrders[id].trackingNumber = row['包裹查詢號碼'] || row['追蹤號碼'] || row['物流單號'];
+                    if (optionName) tempOrders[id].optionName = optionName;
+                }
+            });
+
+            Object.values(tempOrders).forEach(newO => {
+                newO.items = newO.itemsArray.join('\n\n');
+                delete newO.itemsArray;
+
+                const existingIdx = orders.findIndex(o => o.id === newO.id);
+                if (existingIdx !== -1) {
+                    skipped++;
+                } else {
+                    orders.push(newO);
+                    added++;
+                }
+            });
+
+            saveToStorage();
+            document.getElementById('importStatus').innerHTML = 
+                `<span class="text-green-600 font-bold p-2 bg-green-50 rounded border border-green-200 block">匯入成功！本次新增 ${added} 筆訂單，略過已存在 ${skipped} 筆。請前往訂單管理查看。</span>`;
+        }
+
+        // --- Order Management Modal ---
+        function showOrderModal(id = null) {
+            const modal = document.getElementById('orderModal');
+            modal.classList.remove('hidden');
+            
+            const platSelect = document.getElementById('m_platform');
+            platSelect.onchange = updateModalBranchList;
+            // always refresh branch list when modal opens
+            updateModalBranchList();
+
+            if(id) {
+                const o = orders.find(x => x.id === id);
+                document.getElementById('m_id').value = o.id;
+                
+                if(!platforms.includes(o.platform)) {
+                    platSelect.innerHTML += `<option value="${o.platform}">${o.platform}</option>`;
+                }
+                platSelect.value = o.platform;
+                updateModalBranchList();
+                
+                document.getElementById('m_price').value = o.price;
+                document.getElementById('m_platformFee').value = o.platformFee;
+                document.getElementById('m_cost').value = o.cost || 0;
+                document.getElementById('m_orderDate').value = o.date;
+                document.getElementById('m_status').value = o.status;
+                document.getElementById('m_items').value = o.items;
+                document.getElementById('m_buyerAccount').value = o.buyerAccount || '';
+                document.getElementById('m_branch').value = o.branch || '';
+                document.getElementById('m_shippingMethod').value = o.shippingMethod || '';
+                document.getElementById('m_trackingNumber').value = o.trackingNumber || '';
+                document.getElementById('m_optionName').value = o.optionName || '';
+                document.getElementById('m_buyerRemark').value = o.buyerRemark || '';
+                document.getElementById('m_invoiceNum').value = o.invoiceNum || '';
+                document.getElementById('m_invoiceDate').value = o.invoiceDate || '';
+                document.getElementById('m_incomingInvoiceNum').value = o.incomingInvoiceNum || '';
+                document.getElementById('m_incomingInvoiceDate').value = o.incomingInvoiceDate || '';
+                document.getElementById('m_id').readOnly = true;
+            } else {
+                document.getElementById('m_id').value = 'M' + Date.now();
+                document.getElementById('m_id').readOnly = false;
+                document.getElementById('m_price').value = 0;
+                document.getElementById('m_platformFee').value = 0;
+                document.getElementById('m_cost').value = 0;
+                document.getElementById('m_orderDate').value = new Date().toISOString().split('T')[0];
+                document.getElementById('m_items').value = '';
+                document.getElementById('m_buyerAccount').value = '';
+                document.getElementById('m_shippingMethod').value = '';
+                document.getElementById('m_trackingNumber').value = '';
+                document.getElementById('m_optionName').value = '';
+                document.getElementById('m_buyerRemark').value = '';
+                document.getElementById('m_invoiceNum').value = '';
+                document.getElementById('m_invoiceDate').value = '';
+                document.getElementById('m_incomingInvoiceNum').value = '';
+                document.getElementById('m_incomingInvoiceDate').value = '';
+            }
+        }
+
+        function hideOrderModal() {
+            document.getElementById('orderModal').classList.add('hidden');
+        }
+
+        function saveManualOrder() {
+            const id = document.getElementById('m_id').value.trim();
+            if(!id) return alert('訂單編號不能為空');
+            
+            const existingIdx = orders.findIndex(o => o.id === id);
+
+            // 若有銷項發票資料，將發票資訊置入詳細商品內容，方便檢貨單列印提供客人資訊
+            let itemsText = document.getElementById('m_items').value || '';
+            const invNumVal = document.getElementById('m_invoiceNum').value.trim();
+            const invDateVal = document.getElementById('m_invoiceDate').value || '';
+            if ((invNumVal || invDateVal) && !itemsText.includes('發票資訊')) {
+                const invoiceLine = `\n\n發票資訊：${invNumVal ? '號碼 ' + invNumVal : ''}${(invNumVal && invDateVal) ? ' / ' : ''}${invDateVal ? '日期 ' + invDateVal : ''}`;
+                itemsText = itemsText + invoiceLine;
+            }
+
+            const orderData = {
+                id: id,
+                date: document.getElementById('m_orderDate').value || new Date().toISOString().split('T')[0],
+                platform: document.getElementById('m_platform').value,
+                branch: document.getElementById('m_branch').value.trim() || '',
+                price: parseFloat(document.getElementById('m_price').value || 0),
+                platformFee: parseFloat(document.getElementById('m_platformFee').value || 0),
+                cost: parseFloat(document.getElementById('m_cost').value || 0),
+                status: document.getElementById('m_status').value,
+                items: itemsText,
+                buyerAccount: document.getElementById('m_buyerAccount').value,
+                buyerRemark: document.getElementById('m_buyerRemark').value,
+                shippingMethod: document.getElementById('m_shippingMethod').value || '',
+                trackingNumber: document.getElementById('m_trackingNumber').value || '',
+                optionName: document.getElementById('m_optionName').value || '',
+                invoiceNum: document.getElementById('m_invoiceNum').value.trim(),
+                invoiceDate: document.getElementById('m_invoiceDate').value || '',
+                incomingInvoiceNum: document.getElementById('m_incomingInvoiceNum').value.trim(),
+                incomingInvoiceDate: document.getElementById('m_incomingInvoiceDate').value || '',
+                reconciled: existingIdx >= 0 ? orders[existingIdx].reconciled : false,
+                wireFee: existingIdx >= 0 ? orders[existingIdx].wireFee : 0
+            };
+
+            if(existingIdx >= 0) {
+                if (!orderData.date || orderData.date === new Date().toISOString().split('T')[0]) {
+                    orderData.date = orders[existingIdx].date;
+                }
+                orders[existingIdx] = {...orders[existingIdx], ...orderData};
+            } else {
+                orders.push(orderData);
+            }
+
+            saveToStorage();
+            hideOrderModal();
+            renderOrderList();
+        }
+
+        // --- Render Lists with Search/Filter ---
+        function renderOrderList() {
+            const list = document.getElementById('orderList');
+            const keyword = document.getElementById('searchKeyword').value.toLowerCase();
+            const statusFilter = document.getElementById('searchStatus').value;
+            const platformFilter = document.getElementById('searchPlatform').value;
+            const monthFilter = document.getElementById('searchMonth').value;
+            const dateFrom = document.getElementById('searchDateFrom').value;
+            const dateTo = document.getElementById('searchDateTo').value;
+            const selectedBranches = getSelectedBranches();
+            
+            list.innerHTML = '';
+            
+            const filtered = orders.filter(o => {
+                // 狀態篩選
+                const matchStatus = statusFilter === 'All' || o.status === statusFilter;
+                
+                // 關鍵字篩選
+                const searchStr = `${o.id} ${o.buyerAccount} ${o.items} ${o.platform} ${o.branch || ''}`.toLowerCase();
+                const matchKeyword = keyword === '' || searchStr.includes(keyword);
+                
+                // 平台篩選
+                const matchPlatform = platformFilter === 'All' || o.platform === platformFilter;
+                
+                // 月份篩選
+                let matchMonth = true;
+                if (monthFilter) {
+                    matchMonth = o.date.startsWith(monthFilter);
+                }
+                
+                // 日期範圍篩選
+                let matchDate = true;
+                if (dateFrom && o.date < dateFrom) matchDate = false;
+                if (dateTo && o.date > dateTo) matchDate = false;
+                
+                // 店名篩選（多選）
+                let matchBranch = true;
+                if (selectedBranches.length > 0) {
+                    matchBranch = selectedBranches.includes(o.branch || '');
+                }
+                
+                return matchStatus && matchKeyword && matchPlatform && matchMonth && matchDate && matchBranch;
+            });
+
+            const sorted = filtered.sort((a,b) => new Date(b.date) - new Date(a.date));
+            
+            // 更新篩選結果計數
+            const resultCount = `篩選結果: ${sorted.length} 筆`;
+            document.getElementById('filterResultCount').innerText = resultCount;
+
+            sorted.forEach(o => {
+                const tr = document.createElement('tr');
+                const net = o.price - o.platformFee;
+                
+                const displayId = o.id;
+                const displayBuyer = o.buyerAccount ? ` / <span class="text-slate-500">${o.buyerAccount}</span>` : '';
+                const displayStore = o.branch ? `<div class="text-[10px] text-purple-500 font-bold">分店: ${o.branch}</div>` : '';
+                
+                const shippingDisplay = o.shippingMethod ? `<div class="text-[10px] text-slate-500">寄送: ${o.shippingMethod}</div>` : '';
+                const trackingDisplay = o.trackingNumber ? `<div class="text-[10px] text-slate-500">追蹤: ${o.trackingNumber}</div>` : '';
+                const optionDisplay = o.optionName ? `<div class="text-[10px] text-slate-500">選項: ${o.optionName}</div>` : '';
+
+                tr.innerHTML = `
+                    <td class="px-4 py-3 text-xs text-gray-500 whitespace-nowrap">${o.date}</td>
+                    <td class="px-4 py-3">
+                        <div class="font-mono font-bold text-blue-700">${displayId}${displayBuyer}</div>
+                        <div class="text-[10px] text-gray-400 mt-1">${o.platform}</div>
+                        ${displayStore}
+                        ${shippingDisplay}
+                        ${trackingDisplay}
+                        ${optionDisplay}
+                    </td>
+                    <td class="px-4 py-3 text-right font-medium text-slate-700">$${o.price.toLocaleString()}</td>
+                    <td class="px-4 py-3 text-right text-red-500">-$${o.platformFee.toLocaleString()}</td>
+                    <td class="px-4 py-3 text-right font-bold text-green-700">$${net.toLocaleString()}</td>
+                    <td class="px-4 py-3 text-center">
+                        <span class="px-2 py-1 rounded text-xs font-bold ${
+                            o.status === '已完成' ? 'bg-green-100 text-green-800' : 
+                            o.status === '不成立' ? 'bg-red-100 text-red-800' : 'bg-slate-100 text-slate-600'
+                        }">${o.status}</span>
+                    </td>
+                    <td class="px-4 py-3 text-center">
+                        ${o.reconciled ? '<span class="text-green-500 text-xs font-bold bg-green-50 px-2 py-1 rounded">已核銷</span>' : '<span class="text-gray-400 text-xs">未入帳</span>'}
+                    </td>
+                    <td class="px-4 py-3 text-center space-x-2 whitespace-nowrap">
+                        <button onclick="printOrder('${o.id}')" class="text-blue-600 hover:text-blue-900 text-xs font-bold bg-blue-50 px-2 py-1 rounded border border-blue-200">列印檢貨</button>
+                        <button onclick="showOrderModal('${o.id}')" class="text-slate-500 hover:text-slate-800 text-xs font-bold px-2 py-1">編輯</button>
+                        <button onclick="deleteOrder('${o.id}')" class="text-red-400 hover:text-red-600 text-xs px-1">刪除</button>
+                    </td>
+                `;
+                list.appendChild(tr);
+            });
+            
+            // 更新平台篩選下拉選單和店名篩選容器
+            renderPlatformFilter();
+            renderBranchFilter();
+        }
+
+        function deleteOrder(id) {
+            if(!confirm('確定刪除此訂單數據？')) return;
+            orders = orders.filter(o => o.id !== id);
+            saveToStorage();
+            renderOrderList();
+        }
+
+        // --- Reconcile ---
+        function renderReconcileList() {
+            const list = document.getElementById('reconcileList');
+            // populate platform filter options
+            const platSel = document.getElementById('reconcilePlatformFilter');
+            if (platSel) {
+                const prev = platSel.value;
+                let opts = '<option value="All">所有平台</option>';
+                platforms.forEach(p => { opts += `<option value="${p}">${p}</option>`; });
+                platSel.innerHTML = opts;
+                platSel.value = prev || 'All';
+            }
+
+            const platformFilter = document.getElementById('reconcilePlatformFilter')?.value || 'All';
+            const monthFilter = document.getElementById('reconcileMonth')?.value || '';
+            const orderIdFilter = (document.getElementById('reconcileOrderId')?.value || '').trim().toLowerCase();
+
+            list.innerHTML = '';
+            const unReconciled = orders.filter(o => !o.reconciled && o.status === '已完成');
+
+            const filtered = unReconciled.filter(o => {
+                if (platformFilter !== 'All' && o.platform !== platformFilter) return false;
+                if (monthFilter && !o.date.startsWith(monthFilter)) return false;
+                if (orderIdFilter && !o.id.toLowerCase().includes(orderIdFilter)) return false;
+                return true;
+            });
+
+            filtered.forEach(o => {
+                const tr = document.createElement('tr');
+                tr.className = "hover:bg-slate-50";
+                tr.innerHTML = `
+                    <td class="px-4 py-2 text-center"><input type="checkbox" class="order-chk w-4 h-4 cursor-pointer" value="${o.id}" onchange="calcSelected()"></td>
+                    <td class="px-4 py-2 font-mono text-xs font-bold">${o.id}</td>
+                    <td class="px-4 py-2 text-right text-slate-600">$${o.price.toLocaleString()}</td>
+                    <td class="px-4 py-2 text-right text-red-500">-$${o.platformFee.toLocaleString()}</td>
+                    <td class="px-4 py-2 text-right font-bold text-blue-700">$${(o.price - o.platformFee).toLocaleString()}</td>
+                    <td class="px-4 py-2 text-center"><input type="text" placeholder="#號" id="inv-${o.id}" value="${o.incomingInvoiceNum || ''}" class="border text-xs p-1 w-24 rounded focus:ring-1 focus:ring-blue-500"></td>
+<td class="px-4 py-2 text-center"><input type="date" id="invdate-${o.id}" value="${o.incomingInvoiceDate || ''}" class="border text-xs p-1 w-36 rounded focus:ring-1 focus:ring-blue-500"></td>
+                `;
+                list.appendChild(tr);
+            });
+            calcSelected();
+            // whenever the list updates, also refresh history display (keeps counts in sync)
+            renderReconcileHistory();
+        }
+
+        function clearReconcileFilters() {
+            const p = document.getElementById('reconcilePlatformFilter'); if (p) p.value = 'All';
+            const m = document.getElementById('reconcileMonth'); if (m) m.value = '';
+            const id = document.getElementById('reconcileOrderId'); if (id) id.value = '';
+            renderReconcileList();
+        }
+
+        // --- Reconcile History UI & Helpers ---
+        function renderReconcileHistory() {
+            const container = document.getElementById('reconcileHistoryContainer');
+            if (!container) return;
+            if (reconcileHistory.length === 0) {
+                container.innerHTML = '<p class="text-sm text-gray-500 p-4">尚無核銷紀錄</p>';
+                return;
+            }
+            let html = `<table class="min-w-full divide-y divide-gray-200 text-sm">
+                        <thead class="bg-gray-50 text-xs text-gray-500 uppercase">
+                          <tr>
+                            <th class="px-3 py-2">時間</th>
+                            <th class="px-3 py-2 text-center">筆數</th>
+                            <th class="px-3 py-2 text-right">手續費</th>
+                            <th class="px-3 py-2">入帳日期</th>
+                            <th class="px-3 py-2 text-center">操作</th>
+                          </tr>
+                        </thead><tbody class="bg-white">`;
+            reconcileHistory.forEach((h, idx) => {
+                html += `<tr class="hover:bg-slate-50">
+                            <td class="px-3 py-2 font-mono text-xs">${h.timestamp}</td>
+                            <td class="px-3 py-2 text-center">${h.orderIds.length}</td>
+                            <td class="px-3 py-2 text-right">$${h.wireFee.toLocaleString()}</td>
+                            <td class="px-3 py-2">${h.actualDate}</td>
+                            <td class="px-3 py-2 text-center"><button onclick="showHistoryModal(${idx})" class="text-blue-600 underline text-xs">編輯</button></td>
+                        </tr>`;
+            });
+            html += `</tbody></table>`;
+            container.innerHTML = html;
+        }
+
+        let currentHistoryIndex = null;
+        function showHistoryModal(idx) {
+            currentHistoryIndex = idx;
+            const hist = reconcileHistory[idx];
+            const container = document.getElementById('historyModalContent');
+            container.innerHTML = '';
+            // 顯示整體欄位 (可編輯手續費與入帳日期)，並顯示標題列說明每欄位用途
+            container.innerHTML += `
+              <div class="flex gap-3 items-center mb-3">
+                <div class="flex items-center gap-2">
+                  <label class="text-xs font-bold">手續費 (合計)</label>
+                  <input id="hist_wireFee" type="number" class="border rounded p-1 text-sm" value="${hist.wireFee || 0}">
+                </div>
+                <div class="flex items-center gap-2">
+                  <label class="text-xs font-bold">入帳日期</label>
+                  <input id="hist_actualDate" type="date" class="border rounded p-1 text-sm" value="${hist.actualDate || ''}">
+                </div>
+              </div>
+              <div class="grid grid-cols-12 text-xs font-bold border-b pb-2 mb-2">
+                <div class="col-span-1">保留</div>
+                <div class="col-span-3">訂單編號</div>
+                <div class="col-span-4">進項發票號碼</div>
+                <div class="col-span-4">進項發票日期</div>
+              </div>`;
+
+            hist.orderIds.forEach(id => {
+                const o = orders.find(o => o.id === id) || {};
+                const inv = hist.incomingInvoiceMap && hist.incomingInvoiceMap[id] ? hist.incomingInvoiceMap[id] : (o.incomingInvoiceNum || '');
+                const invdate = hist.incomingInvoiceDateMap && hist.incomingInvoiceDateMap[id] ? hist.incomingInvoiceDateMap[id] : (o.incomingInvoiceDate || '');
+                container.innerHTML += `
+                  <div class="grid grid-cols-12 gap-2 items-center mb-2">
+                    <div class="col-span-1"><input type="checkbox" class="hist-unreconcile" data-id="${id}" checked></div>
+                    <div class="col-span-3 font-mono text-xs">${id}</div>
+                    <div class="col-span-4"><input type="text" class="hist-invoice p-1 border rounded w-full text-xs" data-id="${id}" value="${inv}" placeholder="#號"></div>
+                    <div class="col-span-4"><input type="date" class="hist-invdate p-1 border rounded w-full text-xs" data-id="${id}" value="${invdate}"></div>
+                  </div>`;
+            });
+            document.getElementById('historyModal').classList.remove('hidden');
+        }
+        function hideHistoryModal() {
+            document.getElementById('historyModal').classList.add('hidden');
+        }
+        function saveHistoryModal() {
+            if (currentHistoryIndex === null) return;
+            const hist = reconcileHistory[currentHistoryIndex];
+            // 更新整體手續費與入帳日
+            const newWire = parseFloat(document.getElementById('hist_wireFee')?.value || 0);
+            const newActual = document.getElementById('hist_actualDate')?.value || hist.actualDate || '';
+            hist.wireFee = isNaN(newWire) ? 0 : newWire;
+            hist.actualDate = newActual;
+
+            const checkboxes = Array.from(document.querySelectorAll('.hist-unreconcile'));
+            const invoiceInputs = Array.from(document.querySelectorAll('.hist-invoice'));
+            const toKeep = [];
+            const newInvoiceMap = {};
+            const newInvoiceDateMap = {};
+            checkboxes.forEach(cb => {
+                const id = cb.dataset.id;
+                if (cb.checked) toKeep.push(id);
+            });
+            invoiceInputs.forEach(input => {
+                const id = input.dataset.id;
+                newInvoiceMap[id] = input.value.trim();
+            });
+            const dateInputs = Array.from(document.querySelectorAll('.hist-invdate'));
+            dateInputs.forEach(input => {
+                const id = input.dataset.id;
+                newInvoiceDateMap[id] = input.value || '';
+            });
+            // update orders and history entry
+            hist.orderIds.forEach(id => {
+                const o = orders.find(o => o.id === id);
+                if (toKeep.includes(id)) {
+                    if (o) {
+                        o.incomingInvoiceNum = newInvoiceMap[id] || o.incomingInvoiceNum;
+                        o.incomingInvoiceDate = newInvoiceDateMap[id] || o.incomingInvoiceDate;
+                        if (hist.actualDate) o.actualIncomeDate = hist.actualDate;
+                    }
+                } else {
+                    if (o) {
+                        o.reconciled = false;
+                        o.wireFee = 0;
+                        o.actualIncomeDate = '';
+                    }
+                }
+            });
+            hist.orderIds = toKeep;
+            hist.incomingInvoiceMap = newInvoiceMap;
+            hist.incomingInvoiceDateMap = newInvoiceDateMap;
+            // remove entry if empty
+            if (hist.orderIds.length === 0) reconcileHistory.splice(currentHistoryIndex, 1);
+            saveToStorage();
+            saveReconcileHistory();
+            renderReconcileHistory();
+            renderReconcileList();
+            hideHistoryModal();
+        }
+
+        function toggleSelectAll() {
+            const chks = document.querySelectorAll('.order-chk');
+            const all = document.getElementById('selectAll').checked;
+            chks.forEach(c => c.checked = all);
+            calcSelected();
+        }
+
+        function calcSelected() {
+            const chks = Array.from(document.querySelectorAll('.order-chk:checked'));
+            let total = 0;
+            let platformFeeTotal = 0;
+            chks.forEach(c => {
+                const o = orders.find(x => x.id === c.value);
+                total += (o.price - o.platformFee);
+                platformFeeTotal += o.platformFee;
+            });
+            document.getElementById('selectedCount').innerText = chks.length;
+            document.getElementById('selectedPlatformFee').innerText = '$' + platformFeeTotal.toLocaleString();
+            document.getElementById('selectedAmount').innerText = '$' + total.toLocaleString();
+        }
+
+        function applyBatchReconcile() {
+            const selected = Array.from(document.querySelectorAll('.order-chk:checked')).map(c => c.value);
+            if(selected.length === 0) return alert('請勾選要核銷的訂單');
+
+            const wireFee = parseFloat(document.getElementById('batchWireFee').value || 0);
+            const actualDate = document.getElementById('batchIncomeDate').value || new Date().toISOString().split('T')[0];
+            const feePer = wireFee / selected.length;
+
+            const sharedInv = (document.getElementById('batchInvoiceNumber') || {value: ''}).value.trim();
+
+            // prepare history entry
+            const entry = {
+                timestamp: new Date().toISOString(),
+                orderIds: [],
+                wireFee,
+                actualDate,
+                incomingInvoiceMap: {},
+                incomingInvoiceDateMap: {}
+            };
+
+            selected.forEach(id => {
+                const idx = orders.findIndex(o => o.id === id);
+                orders[idx].reconciled = true;
+                orders[idx].wireFee = feePer;
+                orders[idx].actualIncomeDate = actualDate;
+                const inv = sharedInv || document.getElementById(`inv-${id}`).value;
+                const invDate = document.getElementById(`invdate-${id}`)?.value || '';
+                orders[idx].incomingInvoiceNum = inv;
+                orders[idx].incomingInvoiceDate = invDate;
+                entry.orderIds.push(id);
+                entry.incomingInvoiceMap[id] = inv;
+                entry.incomingInvoiceDateMap[id] = invDate;
+            });
+
+            // save history and orders
+            reconcileHistory.push(entry);
+            saveReconcileHistory();
+            saveToStorage();
+            alert(`成功核銷 ${selected.length} 筆訂單！`);
+            renderReconcileList();
+        }
+
+        // --- Print Function ---
+        function printOrder(id) {
+            const o = orders.find(x => x.id === id);
+            if(!o) return;
+
+            document.getElementById('p_id').innerText = o.id;
+            document.getElementById('p_platform').innerText = o.platform;
+            document.getElementById('p_buyer').innerText = o.buyerAccount || '無提供';
+            document.getElementById('p_date').innerText = o.date;
+            
+            // ✅ 填寫商品選項名稱
+            document.getElementById('p_optionName').innerText = o.optionName || '(無)';
+            
+            // 寄送方式與追蹤號碼
+            if (o.shippingMethod || o.trackingNumber) {
+                document.getElementById('p_shipping_container').style.display = 'block';
+                document.getElementById('p_shipping').innerText = o.shippingMethod || '(未指定)';
+                document.getElementById('p_tracking').innerText = o.trackingNumber || '(未提供)';
+            } else {
+                document.getElementById('p_shipping_container').style.display = 'none';
+            }
+            
+            if(o.buyerRemark && o.buyerRemark.trim() !== '') {
+                document.getElementById('p_remark_container').style.display = 'block';
+                document.getElementById('p_remark').innerText = o.buyerRemark;
+            } else {
+                document.getElementById('p_remark_container').style.display = 'none';
+            }
+
+            document.getElementById('p_items').innerText = o.items || "無商品明細資訊";
+            document.getElementById('p_total').innerText = o.price.toLocaleString();
+            
+            const headerExtra = localStorage.getItem('oms_slip_header') || '';
+            const footerExtra = localStorage.getItem('oms_slip_footer') || '';
+            document.getElementById('p_headerExtra').innerText = headerExtra;
+            document.getElementById('p_footerExtra').innerText = footerExtra;
+            
+            const now = new Date();
+            document.getElementById('printTime').innerText = `列印時間: ${now.toLocaleDateString()} ${now.toLocaleTimeString()}`;
+
+            const printAreaEl = document.getElementById('printArea');
+            printAreaEl.classList.remove('hidden');
+
+            setTimeout(() => {
+                try { window.print(); } catch (e) { console.error('print failed', e); }
+                setTimeout(() => printAreaEl.classList.add('hidden'), 200);
+            }, 60);
+        }
+
+        // --- Reports & Exports ---
+        function renderReports() {
+            const platformFilter = document.getElementById('reportPlatformFilter').value;
+            const branchSelect = document.getElementById('reportBranchFilter');
+            const yearSelect = document.getElementById('reportYearFilter');
+            const monthSelect = document.getElementById('reportMonthFilter');
+            const keyword = document.getElementById('reportKeyword')?.value.toLowerCase() || '';
+
+            // rebuild branch options according to platform filter
+            if (branchSelect) {
+                let branchOpts = '<option value="All">全部分店</option>';
+                const branchSet = new Set();
+                orders.forEach(o => {
+                    if (platformFilter === 'All' || o.platform === platformFilter) {
+                        if (o.branch) branchSet.add(o.branch);
+                    }
+                });
+                Array.from(branchSet).sort().forEach(b => {
+                    branchOpts += `<option value="${b}">${b}</option>`;
+                });
+                branchSelect.innerHTML = branchOpts;
+            }
+            const branchFilter = branchSelect?.value || 'All';
+
+            // rebuild year options (based on orders)
+            if (yearSelect) {
+                const prevYear = yearSelect.value;
+                const yearSet = new Set();
+                orders.forEach(o => { if (o && o.date) yearSet.add(String(o.date).substring(0,4)); });
+                const years = Array.from(yearSet).sort();
+                let yearOpts = '<option value="All">全部年度</option>';
+                years.forEach(y => yearOpts += `<option value="${y}">${y}</option>`);
+                yearSelect.innerHTML = yearOpts;
+                if (years.includes(prevYear)) {
+                    yearSelect.value = prevYear;
+                } else {
+                    yearSelect.value = 'All';
+                }
+            }
+            const yearFilter = yearSelect?.value || 'All';
+
+            // rebuild month options (static 01-12)
+            if (monthSelect) {
+                const prevMonth = monthSelect.value;
+                let monthOpts = '<option value="All">全部月份</option>';
+                for (let m=1;m<=12;m++) {
+                    const mm = m.toString().padStart(2,'0');
+                    monthOpts += `<option value="${mm}">${mm}</option>`;
+                }
+                monthSelect.innerHTML = monthOpts;
+                if (['All','01','02','03','04','05','06','07','08','09','10','11','12'].includes(prevMonth)) {
+                    monthSelect.value = prevMonth;
+                } else {
+                    monthSelect.value = 'All';
+                }
+            }
+            const monthFilter = monthSelect?.value || 'All';
+
+            const valid = orders.filter(o => 
+                o.status === '已完成' && 
+                (platformFilter === 'All' || o.platform === platformFilter) &&
+                (branchFilter === 'All' || o.branch === branchFilter) &&
+                (yearFilter === 'All' || o.date.startsWith(yearFilter)) &&
+                (monthFilter === 'All' || o.date.substring(5,7) === monthFilter) &&
+                (keyword === '' || (`${o.id} ${o.buyerAccount} ${o.platform} ${o.branch}`.toLowerCase()).includes(keyword))
+            );
+
+            const totalSales = valid.reduce((sum, o) => sum + o.price, 0);
+            const totalFees = valid.reduce((sum, o) => sum + o.platformFee, 0);
+            const totalCost = valid.reduce((sum, o) => sum + (o.cost || 0), 0);
+            const totalWire = valid.reduce((sum, o) => sum + (o.wireFee || 0), 0);
+            const grossProfit = totalSales - totalFees - totalCost - totalWire;
+
+            document.getElementById('stat-sales').innerText = `$${totalSales.toLocaleString()}`;
+            document.getElementById('stat-fees').innerText = `$${totalFees.toLocaleString()}`;
+            document.getElementById('stat-cost').innerText = `$${totalCost.toLocaleString()}`;
+            document.getElementById('stat-profit').innerText = `$${grossProfit.toLocaleString()}`;
+            document.getElementById('stat-profit').className = grossProfit >= 0 ? 'text-2xl font-black text-green-700' : 'text-2xl font-black text-red-600';
+
+            const ctxS = document.getElementById('salesChart').getContext('2d');
+            const ctxP = document.getElementById('platformChart').getContext('2d');
+
+            if(salesChart) salesChart.destroy();
+            if(platformChart) platformChart.destroy();
+
+            const pMap = {};
+            valid.forEach(o => pMap[o.platform] = (pMap[o.platform] || 0) + o.price);
+            
+            platformChart = new Chart(ctxP, {
+                type: 'doughnut',
+                data: {
+                    labels: Object.keys(pMap),
+                    datasets: [{
+                        data: Object.values(pMap),
+                        backgroundColor: ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4']
+                    }]
+                },
+                options: { plugins: { legend: { position: 'bottom' } } }
+            });
+
+            const sMap = {};
+            valid.forEach(o => {
+                const m = o.date.substring(0, 7);
+                sMap[m] = (sMap[m] || 0) + o.price;
+            });
+            const sortedMonths = Object.keys(sMap).sort();
+
+            salesChart = new Chart(ctxS, {
+                type: 'bar',
+                data: {
+                    labels: sortedMonths.length > 0 ? sortedMonths : ['無資料'],
+                    datasets: [{
+                        label: '月銷售額',
+                        data: sortedMonths.map(m => sMap[m]),
+                        backgroundColor: 'rgba(59, 130, 246, 0.8)',
+                        borderRadius: 4
+                    }]
+                },
+                options: {
+                    scales: { y: { beginAtZero: true } }
+                }
+            });
+
+                        // 計算各平台目前未入帳 / 未扣除手續費 / 件數（供主管快速檢視）
+                        const pendingContainer = document.getElementById('reportPendingSummary');
+                        if (pendingContainer) {
+                                const pendingMap = {};
+                                platforms.forEach(p => pendingMap[p] = { count: 0, unpaid: 0, fees: 0 });
+                                orders.forEach(o => {
+                                        if (!o.reconciled && o.status === '已完成') {
+                                                if (!pendingMap[o.platform]) pendingMap[o.platform] = { count: 0, unpaid: 0, fees: 0 };
+                                                pendingMap[o.platform].count += 1;
+                                                pendingMap[o.platform].unpaid += (o.price || 0);
+                                                pendingMap[o.platform].fees += (o.platformFee || 0);
+                                        }
+                                });
+                                let pendingHTML = `
+                                        <h4 class="font-bold mb-3">各平台未入帳統計</h4>
+                                        <div class="overflow-x-auto">
+                                        <table class="min-w-full text-sm divide-y divide-gray-200">
+                                            <thead class="bg-gray-50 text-gray-600 text-xs font-semibold">
+                                                <tr>
+                                                    <th class="px-3 py-2 text-left">平台</th>
+                                                    <th class="px-3 py-2 text-right">未收到金額</th>
+                                                    <th class="px-3 py-2 text-right">未扣除手續費</th>
+                                                    <th class="px-3 py-2 text-center">筆數</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody class="bg-white">
+                                `;
+                                Object.keys(pendingMap).forEach(p => {
+                                        const v = pendingMap[p];
+                                        pendingHTML += `
+                                            <tr>
+                                                <td class="px-3 py-2">${p}</td>
+                                                <td class="px-3 py-2 text-right">$${(v.unpaid || 0).toLocaleString()}</td>
+                                                <td class="px-3 py-2 text-right">$${(v.fees || 0).toLocaleString()}</td>
+                                                <td class="px-3 py-2 text-center">${v.count}</td>
+                                            </tr>
+                                        `;
+                                });
+                                pendingHTML += `</tbody></table></div>`;
+                                pendingContainer.innerHTML = pendingHTML;
+                        }
+
+                        const recentContainer = document.getElementById('reportRecentOrders');
+            if (recentContainer) {
+                const topOrders = valid.sort((a,b)=>new Date(b.date)-new Date(a.date)).slice(0, 50);
+                let tableHTML = `
+                    <h4 class="font-bold mb-3">最近訂單 (含發票資料，最多顯示 50 筆)</h4>
+                    <div class="overflow-x-auto">
+                    <table class="min-w-full text-sm divide-y divide-gray-200">
+                        <thead class="bg-gray-50 text-gray-600 text-xs font-semibold">
+                            <tr>
+                                <th class="px-3 py-2 text-left">日期</th>
+                                <th class="px-3 py-2 text-left">平台</th>
+                                <th class="px-3 py-2 text-left">訂單編號</th>
+                                <th class="px-3 py-2 text-right">銷售額</th>
+                                <th class="px-3 py-2 text-left">發票號碼</th>
+                                <th class="px-3 py-2 text-left">發票日期</th>
+                            </tr>
+                        </thead>
+                        <tbody class="bg-white">
+                `;
+                topOrders.forEach(o => {
+                    tableHTML += `
+                        <tr>
+                            <td class="px-3 py-2">${o.date}</td>
+                            <td class="px-3 py-2">${o.platform}</td>
+                            <td class="px-3 py-2 font-mono">${o.id}</td>
+                            <td class="px-3 py-2 text-right">$${o.price.toLocaleString()}</td>
+                            <td class="px-3 py-2">${o.invoiceNum || ''}</td>
+                            <td class="px-3 py-2">${o.invoiceDate || ''}</td>
+                        </tr>
+                    `;
+                });
+                tableHTML += `</tbody></table></div>`;
+                recentContainer.innerHTML = tableHTML;
+            }
+        }
+
+        function exportReportToExcel() {
+            const platformFilter = document.getElementById('reportPlatformFilter').value;
+            const branchFilter = document.getElementById('reportBranchFilter')?.value || 'All';
+            const yearFilter = document.getElementById('reportYearFilter')?.value || 'All';
+            const monthFilter = document.getElementById('reportMonthFilter')?.value || 'All';
+            const keyword = document.getElementById('reportKeyword')?.value.toLowerCase() || '';
+            const valid = orders.filter(o =>
+                o.status === '已完成' &&
+                (platformFilter === 'All' || o.platform === platformFilter) &&
+                (branchFilter === 'All' || o.branch === branchFilter) &&
+                (yearFilter === 'All' || o.date.startsWith(yearFilter)) &&
+                (monthFilter === 'All' || o.date.substring(5,7) === monthFilter) &&
+                (keyword === '' || (`${o.id} ${o.buyerAccount} ${o.platform} ${o.branch}`.toLowerCase()).includes(keyword))
+            );
+
+            if(valid.length === 0) return alert('沒有可匯出的數據');
+
+            const exportData = valid.map(o => ({
+                '訂單日期': o.date,
+                '銷售平台': o.platform,
+                '分店名稱': o.branch || '',
+                '訂單編號': o.id,
+                '買家帳號': o.buyerAccount || '',
+                '銷售額': o.price,
+                '平台扣款(手續費+金流)': o.platformFee,
+                '產品成本設定': o.cost || 0,
+                '毛利計算': o.price - o.platformFee - (o.cost || 0) - (o.wireFee || 0),
+                '核銷狀態': o.reconciled ? '已核銷入帳' : '未入帳',
+                '買家備註': o.buyerRemark || '',
+                '銷項發票號碼': o.invoiceNum || '',
+                '銷項發票日期': o.invoiceDate || '',
+                '進項發票號碼': o.incomingInvoiceNum || '',
+                '進項發票日期': o.incomingInvoiceDate || ''
+            }));
+
+            const worksheet = XLSX.utils.json_to_sheet(exportData);
+            const workbook = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(workbook, worksheet, "主管報表");
+            
+            const filename = `銷售報表_${platformFilter === 'All' ? '總覽' : platformFilter}_${new Date().toISOString().split('T')[0]}.xlsx`;
+            XLSX.writeFile(workbook, filename);
+        }
+
+        function exportDataToXLSX() {
+            if (orders.length === 0) return alert('沒有訂單資料可匯出');
+
+            const exportData = orders.map(o => ({
+                '訂單編號': o.id,
+                '訂單日期': o.date,
+                '銷售平台': o.platform,
+                '分店名稱': o.branch || '',
+                '買家帳號': o.buyerAccount || '',
+                '買家備註': o.buyerRemark || '',
+                '銷售額': o.price,
+                '平台手續費': o.platformFee,
+                '產品成本': o.cost || 0,
+                '寄送方式': o.shippingMethod || '',
+                '包裹追蹤號': o.trackingNumber || '',
+                '商品選項': o.optionName || '',
+                '商品明細': o.items || '',
+                '訂單狀態': o.status || '待處理',
+                '銷項發票號碼': o.invoiceNum || '',
+                '銷項發票日期': o.invoiceDate || '',
+                '進項發票號碼': o.incomingInvoiceNum || '',
+                '進項發票日期': o.incomingInvoiceDate || '',
+                '核銷': o.reconciled ? '是' : '否',
+                '提領手續費': o.wireFee || 0
+            }));
+
+            const worksheet = XLSX.utils.json_to_sheet(exportData);
+            const workbook = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(workbook, worksheet, "訂單資料");
+            
+            const filename = `訂單資料_${new Date().toISOString().split('T')[0]}.xlsx`;
+            XLSX.writeFile(workbook, filename);
+            alert('訂單資料已匯出至 ' + filename);
+        }
+
+        function importDataFromXLSX(event) {
+            const file = event.target.files?.[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                try {
+                    const data = new Uint8Array(e.target.result);
+                    const workbook = XLSX.read(data, { type: 'array' });
+                    const worksheet = workbook.Sheets[workbook.SheetNames[0]];
+                    const jsonData = XLSX.utils.sheet_to_json(worksheet);
+
+                    if (jsonData.length === 0) return alert('檔案中無有效資料');
+
+                    const confirmMsg = `即將匯入 ${jsonData.length} 筆訂單資料。新訂單將被添加，現有訂單編號相同時將被覆蓋。確認繼續?`;
+                    if (!confirm(confirmMsg)) return;
+
+                    let imported = 0;
+                    jsonData.forEach(row => {
+                        const orderObj = {
+                            id: row['訂單編號'] || row['訂單號'],
+                            date: row['訂單日期'] || new Date().toISOString().split('T')[0],
+                            platform: row['銷售平台'] || '手動輸入',
+                            branch: row['店名'] || '',
+                            buyerAccount: row['買家帳號'] || '',
+                            buyerRemark: row['買家備註'] || '',
+                            price: parseFloat(row['銷售額']) || 0,
+                            platformFee: parseFloat(row['平台手續費']) || 0,
+                            cost: parseFloat(row['產品成本']) || 0,
+                            shippingMethod: row['寄送方式'] || '',
+                            trackingNumber: row['包裹追蹤號'] || '',
+                            optionName: row['商品選項'] || '',
+                            items: row['商品明細'] || '',
+                            status: row['訂單狀態'] || '待處理',
+                            invoiceNum: row['發票號碼'] || row['銷項發票號碼'] || '',
+                            invoiceDate: row['發票日期'] || row['銷項發票日期'] || '',
+                            incomingInvoiceNum: row['進項發票號碼'] || '',
+                            incomingInvoiceDate: row['進項發票日期'] || '',
+                            reconciled: (row['核銷'] === '是' || row['核銷'] === true),
+                            wireFee: parseFloat(row['提領手續費']) || 0
+                        };
+
+                        const idx = orders.findIndex(o => o.id === orderObj.id);
+                        if (idx >= 0) {
+                            orders[idx] = { ...orders[idx], ...orderObj };
+                        } else {
+                            orders.push(orderObj);
+                        }
+                        imported++;
+                    });
+
+                    saveToStorage();
+                    alert(`成功匯入 ${imported} 筆訂單資料`);
+                    renderOrderList();
+                    event.target.value = '';
+                } catch (err) {
+                    alert('匯入失敗: ' + err.message);
+                    console.error('Import error:', err);
+                }
+            };
+            reader.readAsArrayBuffer(file);
+        }
+
+        // --- Backup & Data System ---
+        function exportData() {
+            const backupObj = { orders, platforms, branches, reconcileHistory };
+            const blob = new Blob([JSON.stringify(backupObj)], {type: 'application/json'});
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `System_Backup_${new Date().toISOString().split('T')[0]}.json`;
+            a.click();
+        }
+
+        function importBackup(event) {
+            const file = event.target.files[0];
+            if(!file) return;
+            const r = new FileReader();
+            r.onload = (e) => {
+                try {
+                    const d = JSON.parse(e.target.result);
+                    if(confirm('警告：確定要回復備份嗎？目前的資料將會被完全覆蓋！')) {
+                        if(Array.isArray(d)) {
+                            orders = d;
+                        } else {
+                            if(d.orders) orders = d.orders;
+                            if(d.platforms) platforms = d.platforms;
+                            if(d.branches) branches = d.branches;
+                            if(d.reconcileHistory) reconcileHistory = d.reconcileHistory;
+                        }
+                        saveToStorage();
+                        savePlatforms();
+                        alert('備份回復成功！系統將重整。');
+                        location.reload();
+                    }
+                } catch(err) { alert('備份檔案格式不正確或已損毀！'); }
+            };
+            r.readAsText(file);
+            event.target.value = '';
+        }
+
+        function clearAllData() {
+            if(confirm('【嚴重警告】確定清空所有資料？\n這將刪除所有訂單紀錄。強烈建議操作前先匯出 JSON 備份檔。')) {
+                if(prompt('請輸入 "DELETE" 確認刪除：') === 'DELETE') {
+                    orders = [];
+                    platforms = ["Shopee", "Momo", "Official", "Other"];
+                    saveToStorage();
+                    savePlatforms();
+                    alert('資料已清空');
+                    location.reload();
+                } else {
+                    alert('刪除已取消');
+                }
+            }
+        }
+
+        function loadSlipCustomization() {
+            const header = localStorage.getItem('oms_slip_header') || '';
+            const footer = localStorage.getItem('oms_slip_footer') || '';
+            document.getElementById('slipHeader').value = header;
+            document.getElementById('slipFooter').value = footer;
+        }
+
+        function saveSlipCustomization() {
+            const header = document.getElementById('slipHeader').value.trim();
+            const footer = document.getElementById('slipFooter').value.trim();
+            
+            localStorage.setItem('oms_slip_header', header);
+            localStorage.setItem('oms_slip_footer', footer);
+            
+            alert('出貨檢貨單自訂設定已保存！');
+        }
+
+        // --- 平台篩選與店名篩選相關函數 ---
+        function renderPlatformFilter() {
+            const select = document.getElementById('searchPlatform');
+            const currentValue = select.value;
+            
+            // 收集所有唯一的平台
+            const uniquePlatforms = [...new Set(orders.map(o => o.platform))].sort();
+            
+            let html = '<option value="All">所有平台</option>';
+            uniquePlatforms.forEach(p => {
+                html += `<option value="${p}">${p}</option>`;
+            });
+            
+            select.innerHTML = html;
+            select.value = currentValue || 'All';
+        }
+
+        function renderBranchFilter() {
+            const container = document.getElementById('branchFilterContainer');
+            
+            // 收集所有唯一的分店名稱（包含訂單裡有的以及在分店設定中定義的）
+            const branchSet = new Set();
+            orders.forEach(o => { if (o.branch) branchSet.add(o.branch); });
+            Object.values(branches).forEach(arr => arr.forEach(b => branchSet.add(b)));
+            const branchNames = [...branchSet].sort();
+            
+            container.innerHTML = '';
+            
+            if (branchNames.length === 0) {
+                container.innerHTML = '<span class="text-xs text-slate-400">暫無分店資料</span>';
+            } else {
+                branchNames.forEach(branchName => {
+                    const checkbox = document.createElement('input');
+                    checkbox.type = 'checkbox';
+                    checkbox.id = `branch_${branchName}`;
+                    checkbox.value = branchName;
+                    checkbox.onchange = renderOrderList;
+                    checkbox.className = 'cursor-pointer';
+                    
+                    const label = document.createElement('label');
+                    label.htmlFor = `branch_${branchName}`;
+                    label.className = 'text-xs cursor-pointer bg-purple-100 rounded px-2 py-1 flex items-center gap-1 whitespace-nowrap font-bold text-purple-700 hover:bg-purple-200';
+                    label.style.display = 'flex';
+                    label.style.alignItems = 'center';
+                    label.style.gap = '4px';
+                    
+                    label.appendChild(checkbox);
+                    label.appendChild(document.createTextNode(branchName));
+                    
+                    container.appendChild(label);
+                });
+            }
+        }
+
+        function getSelectedBranches() {
+            const container = document.getElementById('branchFilterContainer');
+            const checkboxes = container.querySelectorAll('input[type="checkbox"]:checked');
+            return Array.from(checkboxes).map(cb => cb.value);
+        }
+
+        function clearFilters() {
+            // 清除所有篩選欄位
+            document.getElementById('searchKeyword').value = '';
+            document.getElementById('searchStatus').value = 'All';
+            document.getElementById('searchPlatform').value = 'All';
+            document.getElementById('searchMonth').value = '';
+            document.getElementById('searchDateFrom').value = '';
+            document.getElementById('searchDateTo').value = '';
+            
+            // 清除分店篩選勾選
+            const checkboxes = document.getElementById('branchFilterContainer').querySelectorAll('input[type="checkbox"]');
+            checkboxes.forEach(cb => cb.checked = false);
+            
+            // 重新渲染訂單列表
+            renderOrderList();
+        }
+
+        window.onload = initApp;
+    </script>
+</body>
+</html>
