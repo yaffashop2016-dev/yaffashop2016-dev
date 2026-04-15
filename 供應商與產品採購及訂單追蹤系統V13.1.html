@@ -1,0 +1,3543 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>供應商與產品採購及訂單追蹤系統 (Antelope Hardware)</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- 引入 SheetJS 用於 Excel 匯出 -->
+    <script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&display=swap');
+        body {
+            font-family: 'Noto Sans TC', sans-serif;
+            background-color: #f3f4f6;
+        }
+        .tab-active {
+            border-bottom: 3px solid #3b82f6;
+            color: #3b82f6;
+        }
+        .card {
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .modal-overlay {
+            background-color: rgba(0, 0, 0, 0.5);
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 50;
+            align-items: center;
+            justify-content: center;
+        }
+        .modal-overlay.nested {
+            z-index: 60;
+        }
+        .modal-active {
+            display: flex !important;
+        }
+        input:focus, select:focus, textarea:focus {
+            outline: 2px solid #3b82f6;
+            outline-offset: 1px;
+        }
+        .custom-scroll::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+        .custom-scroll::-webkit-scrollbar-thumb {
+            background-color: #cbd5e1;
+            border-radius: 3px;
+        }
+        .rotate-180 {
+            transform: rotate(180deg);
+        }
+    </style>
+</head>
+<body class="p-4 md:p-8">
+    <div class="max-w-[1600px] mx-auto"> <!-- 加寬主容器 -->
+        <header class="mb-8 flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div>
+                <h1 class="text-3xl font-bold text-gray-800">供應商與產品採購及訂單追蹤系統 </h1>
+                <p class="text-gray-500">小型公司  | 詢價狀態管理升級版</p>
+            </div>
+            <div class="flex flex-col gap-2 align-end">
+                <!-- 原有 JSON 備份區 -->
+                <div class="bg-white p-2 rounded shadow-sm border flex gap-2 items-center justify-end">
+                    <span class="text-xs font-bold text-gray-400 uppercase tracking-wider">System JSON</span>
+                    <button onclick="exportData()" class="px-3 py-1 bg-gray-600 text-white text-sm rounded hover:bg-gray-700">備份全部</button>
+                    <label class="px-3 py-1 bg-gray-500 text-white text-sm rounded hover:bg-gray-600 cursor-pointer">
+                        還原 <input type="file" id="importFile" class="hidden" onchange="importData(event)">
+                    </label>
+                </div>
+                <!-- Excel 操作區 -->
+                <div class="bg-white p-2 rounded shadow-sm border flex flex-wrap gap-2 items-center">
+                    <span class="text-xs font-bold text-green-600 uppercase tracking-wider">Excel .xlsx</span>
+                    <div class="flex gap-1">
+                        <button onclick="exportToExcel('suppliers')" class="px-2 py-1 bg-green-100 text-green-700 text-sm rounded hover:bg-green-200 border border-green-200">匯出廠商</button>
+                        <button onclick="exportToExcel('products')" class="px-2 py-1 bg-green-100 text-green-700 text-sm rounded hover:bg-green-200 border border-green-200">匯出產品</button>
+                        <button onclick="exportToExcel('orders')" class="px-2 py-1 bg-green-100 text-green-700 text-sm rounded hover:bg-green-200 border border-green-200">匯出訂單</button>
+                    </div>
+                </div>
+            </div>
+        </header>
+
+        <!-- 頁籤導覽 -->
+        <nav class="flex space-x-2 md:space-x-8 border-b border-gray-200 mb-6 overflow-x-auto pb-1">
+            <button onclick="switchTab('suppliers')" id="tab-suppliers" class="tab-btn py-2 px-1 font-medium tab-active shrink-0 transition-colors">供應商管理</button>
+            <button onclick="switchTab('products')" id="tab-products" class="tab-btn py-2 px-1 font-medium text-gray-500 hover:text-gray-700 shrink-0 transition-colors">產品報價查詢</button>
+            
+            <button onclick="switchTab('client-quotes')" id="tab-client-quotes" class="tab-btn py-2 px-1 font-medium text-purple-600 hover:text-purple-700 shrink-0 flex items-center transition-colors">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0z" /></svg>
+                客戶報價
+            </button>
+            <button onclick="switchTab('supplier-inquiries')" id="tab-supplier-inquiries" class="tab-btn py-2 px-1 font-medium text-indigo-600 hover:text-indigo-700 shrink-0 flex items-center transition-colors">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                供應商詢價
+            </button>
+            
+            <button onclick="switchTab('purchase')" id="tab-purchase" class="tab-btn py-2 px-1 font-medium text-gray-500 hover:text-gray-700 shrink-0 flex items-center transition-colors">
+                採購單管理 <span id="cartCount" class="ml-1 bg-red-500 text-white text-xs px-1.5 rounded-full hidden">0</span>
+            </button>
+            <button onclick="switchTab('orders')" id="tab-orders" class="tab-btn py-2 px-1 font-medium text-gray-500 hover:text-gray-700 shrink-0 transition-colors">訂單追蹤</button>
+            <button onclick="switchTab('add')" id="tab-add" class="tab-btn py-2 px-1 font-medium text-gray-500 hover:text-gray-700 shrink-0 transition-colors">+ 新增資料</button>
+        </nav>
+
+        <!-- 供應商清單頁面 -->
+        <section id="page-suppliers" class="page-content">
+            <div class="mb-4">
+                <input type="text" id="searchSupplier" placeholder="搜尋供應商名稱、統編、聯絡人或地址..." 
+                    class="w-full p-3 border rounded shadow-sm focus:ring-2 focus:ring-blue-500 outline-none"
+                    oninput="renderSuppliers()">
+            </div>
+            <div id="supplierList" class="space-y-2">
+                <!-- 供應商列表動態渲染 -->
+            </div>
+            <p class="text-xs text-gray-400 mt-2 text-center">點擊供應商列可展開詳細資訊與操作按鈕</p>
+        </section>
+
+        <!-- 產品清單頁面 -->
+        <section id="page-products" class="page-content hidden">
+            <div class="mb-4 flex flex-col md:flex-row gap-4">
+                <input type="text" id="searchProduct" placeholder="搜尋產品名稱、規格或供應商..." 
+                    class="flex-1 p-3 border rounded shadow-sm focus:ring-2 focus:ring-blue-500 outline-none"
+                    oninput="renderProducts()">
+            </div>
+            <div class="overflow-x-auto card">
+                <table class="w-full text-left whitespace-nowrap md:whitespace-normal">
+                    <thead class="bg-gray-50 border-b text-gray-600">
+                        <tr>
+                            <th class="p-4">產品名稱/規格</th>
+                            <th class="p-4">供應商</th>
+                            <th class="p-4">預計交期</th>
+                            <th class="p-4">單價</th>
+                            <th class="p-4">含稅</th>
+                            <th class="p-4">運費</th>
+                            <th class="p-4">操作</th>
+                        </tr>
+                    </thead>
+                    <tbody id="productList" class="text-sm">
+                        <!-- 產品列動態渲染 -->
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <!-- 客戶報價頁面 -->
+        <section id="page-client-quotes" class="page-content hidden">
+            <div class="flex justify-between items-center mb-6">
+                <div>
+                    <h2 class="text-2xl font-bold text-gray-800">客戶報價單管理 (給客戶)</h2>
+                    <p class="text-sm text-gray-500">建立給客戶的報價單，追蹤報價狀態，成交可轉採購。</p>
+                </div>
+                <button onclick="openCreateQuoteModal()" class="px-4 py-2 bg-purple-600 text-white rounded font-bold hover:bg-purple-700 flex items-center gap-2">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" /></svg>
+                    建立新報價單
+                </button>
+            </div>
+
+            <div class="bg-white p-4 rounded shadow-sm border mb-4 flex flex-col lg:flex-row gap-4 items-end">
+                <div class="flex-1 w-full">
+                    <label class="block text-xs font-bold text-gray-500 mb-1">搜尋客戶或單號 (QT...)</label>
+                    <input type="text" id="searchQuoteKeyword" placeholder="輸入關鍵字..." 
+                        class="w-full p-2 border rounded focus:ring-2 focus:ring-purple-500 outline-none"
+                        oninput="renderClientQuotes()">
+                </div>
+                <div class="w-full lg:w-48">
+                    <label class="block text-xs font-bold text-gray-500 mb-1">狀態篩選</label>
+                    <select id="filterQuoteStatus" class="w-full p-2 border rounded focus:ring-2 focus:ring-purple-500 outline-none" onchange="renderClientQuotes()">
+                        <option value="all">全部狀態</option>
+                        <option value="open">處理中 (New)</option>
+                        <option value="quoted">已報價</option>
+                        <option value="waiting">等回應</option>
+                        <option value="lost">未成交</option>
+                        <option value="converted">已成交/轉採購</option>
+                    </select>
+                </div>
+                <div class="flex gap-2 w-full lg:w-auto">
+                    <div>
+                        <label class="block text-xs font-bold text-gray-500 mb-1">日期起</label>
+                        <input type="date" id="filterQuoteStart" class="p-2 border rounded focus:ring-2 focus:ring-purple-500 outline-none" onchange="renderClientQuotes()">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-bold text-gray-500 mb-1">日期訖</label>
+                        <input type="date" id="filterQuoteEnd" class="p-2 border rounded focus:ring-2 focus:ring-purple-500 outline-none" onchange="renderClientQuotes()">
+                    </div>
+                </div>
+            </div>
+
+            <div id="clientQuoteList" class="space-y-4">
+                <!-- 報價單列表動態渲染 -->
+            </div>
+        </section>
+
+        <!-- 供應商詢價頁面 (v11.5 狀態管理升級) -->
+        <section id="page-supplier-inquiries" class="page-content hidden">
+             <div class="flex justify-between items-center mb-6">
+                <div>
+                    <h2 class="text-2xl font-bold text-gray-800">供應商詢價單管理 (對廠商)</h2>
+                    <p class="text-sm text-gray-500">紀錄向廠商詢問的新產品，確認有貨後可轉為正式產品資料。</p>
+                </div>
+                <button onclick="openCreateInquiryModal()" class="px-4 py-2 bg-indigo-600 text-white rounded font-bold hover:bg-indigo-700 flex items-center gap-2">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" /></svg>
+                    建立新詢價單
+                </button>
+            </div>
+            
+            <!-- v11.4 新增詢價單搜尋, v11.5 新增狀態篩選 -->
+            <div class="mb-4 bg-white p-3 rounded shadow-sm border flex flex-col md:flex-row gap-4 items-end">
+                <div class="flex-1 w-full">
+                    <label class="block text-xs font-bold text-gray-500 mb-1">搜尋詢價紀錄</label>
+                    <input type="text" id="searchInquiryKeyword" placeholder="輸入廠商名稱、產品名稱、備註或單號..." 
+                        class="w-full p-2 border rounded focus:ring-2 focus:ring-indigo-500 outline-none"
+                        oninput="renderSupplierInquiries()">
+                </div>
+                <div class="w-full md:w-48">
+                    <label class="block text-xs font-bold text-gray-500 mb-1">詢價狀態</label>
+                    <select id="filterInquiryStatus" class="w-full p-2 border rounded focus:ring-2 focus:ring-indigo-500 outline-none" onchange="renderSupplierInquiries()">
+                        <option value="all">全部狀態</option>
+                        <option value="waiting">等回覆</option>
+                        <option value="replied">已回覆</option>
+                        <option value="price_high">價格高</option>
+                        <option value="no_stock">無供貨</option>
+                        <option value="converted">已轉正式產品</option>
+                    </select>
+                </div>
+            </div>
+
+            <div id="supplierInquiryList" class="space-y-4">
+                <!-- 詢價單列表動態渲染 -->
+            </div>
+        </section>
+
+        <!-- 採購單管理頁面 -->
+        <section id="page-purchase" class="page-content hidden">
+            <div class="card p-6">
+                <div class="flex flex-col md:flex-row justify-between md:items-center mb-4 gap-4">
+                    <div>
+                        <h2 class="text-xl font-bold text-blue-800">當前採購清單</h2>
+                        <p class="text-sm text-gray-500">請勾選要下單的項目，系統將<span class="text-red-600 font-bold">僅計算勾選項目</span>的金額。</p>
+                    </div>
+                    <div class="flex gap-2">
+                        <button onclick="clearCart()" class="text-sm text-red-500 hover:underline border border-red-200 px-3 py-1 rounded">清空清單</button>
+                    </div>
+                </div>
+                <div class="overflow-x-auto">
+                    <table class="w-full text-left min-w-[950px]">
+                        <thead class="bg-blue-50 border-b text-blue-800">
+                            <tr>
+                                <th class="p-3 w-10 text-center">
+                                    <input type="checkbox" id="selectAllCart" onchange="toggleSelectAllCart(this)">
+                                </th>
+                                <th class="p-3 w-1/5">產品資訊</th>
+                                <th class="p-3 w-1/6">單價 (可修改)</th>
+                                <th class="p-3 w-20">數量</th>
+                                <th class="p-3 w-32">稅別</th>
+                                <th class="p-3 w-20">運費</th>
+                                <th class="p-3 w-1/6">備註</th>
+                                <th class="p-3 w-24 text-right">小計</th>
+                                <th class="p-3 w-20 text-center">操作</th>
+                            </tr>
+                        </thead>
+                        <tbody id="cartList" class="divide-y text-sm">
+                            <!-- 採購項目渲染 -->
+                        </tbody>
+                        <tfoot class="bg-gray-50 font-bold border-t-2 border-gray-200 text-gray-700">
+                            <tr>
+                                <td colspan="7" class="p-2 text-right text-gray-500">項目小計 (Subtotal)</td>
+                                <td colspan="2" class="p-2 text-right">$<span id="cartSubtotal">0</span></td>
+                            </tr>
+                            <tr>
+                                <td colspan="7" class="p-2 text-right text-gray-500">稅額 (5% VAT)</td>
+                                <td colspan="2" class="p-2 text-right text-red-600">+$<span id="cartTax">0</span></td>
+                            </tr>
+                            <tr>
+                                <td colspan="7" class="p-2 text-right text-gray-500">運費 (Shipping)</td>
+                                <td colspan="2" class="p-2 text-right">+$<span id="cartShipping">0</span></td>
+                            </tr>
+                            <tr class="bg-blue-100 border-t border-blue-200 text-blue-900">
+                                <td colspan="6" class="p-4 text-right">
+                                    已選取 <span id="selectedCount" class="font-bold text-blue-600 text-lg">0</span> 筆
+                                </td>
+                                <td class="p-4 text-right">總金額 (Total):</td>
+                                <td colspan="2" class="p-4 text-right text-2xl font-bold">$<span id="cartTotal">0</span></td>
+                            </tr>
+                        </tfoot>
+                    </table>
+                </div>
+                <div class="mt-6 flex flex-col md:flex-row justify-end gap-3 items-center">
+                    <button onclick="exportCartToExcel()" class="px-6 py-2 bg-green-600 text-white rounded font-bold hover:bg-green-700 transition flex items-center gap-2">
+                         <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+                        匯出 Excel
+                    </button>
+                    <button onclick="confirmOrder()" class="px-6 py-2 bg-blue-600 text-white rounded font-bold hover:bg-blue-700 shadow-lg transition transform hover:-translate-y-0.5">
+                        下單已選項目 (建立訂單)
+                    </button>
+                </div>
+            </div>
+        </section>
+
+        <!-- 訂單追蹤頁面 (v11.1 升級: 物流狀態細緻化, v11.3: 稅務邏輯與付款日) -->
+        <section id="page-orders" class="page-content hidden">
+            <div class="mb-4">
+                <div class="flex flex-col md:flex-row justify-between md:items-center mb-4">
+                    <h2 class="text-2xl font-bold text-gray-800">歷史訂單與交期追蹤</h2>
+                    <button onclick="exportInvoiceExcel()" class="mt-2 md:mt-0 px-4 py-2 bg-green-600 text-white rounded font-bold hover:bg-green-700 flex items-center gap-2">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                        </svg>
+                        匯出發票明細 (Excel)
+                    </button>
+                </div>
+                
+                <!-- 搜尋與篩選區塊 -->
+                <div class="flex flex-col md:flex-row gap-4 bg-white p-4 rounded shadow-sm border">
+                    <div class="flex-1">
+                        <label class="block text-xs font-bold text-gray-500 mb-1">搜尋產品/供應商/發票/原始單號</label>
+                        <input type="text" id="searchOrderKeyword" placeholder="輸入關鍵字..." 
+                            class="w-full p-2 border rounded focus:ring-2 focus:ring-blue-500 outline-none"
+                            oninput="renderOrders()">
+                    </div>
+                    <div class="flex gap-2 w-full md:w-auto">
+                        <div class="w-full md:w-40">
+                            <label class="block text-xs font-bold text-gray-500 mb-1">付款狀態</label>
+                            <select id="filterPaymentStatus" class="w-full p-2 border rounded focus:ring-2 focus:ring-blue-500 outline-none" onchange="renderOrders()">
+                                <option value="all">全部付款狀態</option>
+                                <option value="unpaid">未付款</option>
+                                <option value="paid">已付款</option>
+                                <option value="monthly">月結</option>
+                            </select>
+                        </div>
+                        <div class="w-full md:w-40">
+                            <label class="block text-xs font-bold text-gray-500 mb-1">物流狀態 (升級)</label>
+                            <select id="filterOrderStatus" class="w-full p-2 border rounded focus:ring-2 focus:ring-blue-500 outline-none" onchange="renderOrders()">
+                                <option value="all">全部物流狀態</option>
+                                <option value="ordered">已下單</option>
+                                <option value="partial_shipped">部分出貨</option>
+                                <option value="shipped">全部出貨</option>
+                                <option value="arrived">已收貨</option>
+                                <option value="completed">已驗收完成</option>
+                                <option value="cancelled">已取消(退)</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <div id="orderList" class="space-y-6">
+                <!-- 訂單區塊動態渲染 -->
+            </div>
+        </section>
+
+        <!-- 新增資料表單 -->
+        <section id="page-add" class="page-content hidden">
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                <!-- 供應商表單 -->
+                <div class="card p-6 border-t-4 border-blue-500">
+                    <h2 class="text-xl font-bold mb-4 text-blue-700">錄入供應商資料</h2>
+                    <form id="supplierForm" class="space-y-4">
+                        <div class="grid grid-cols-2 gap-2">
+                            <div>
+                                <label class="block text-sm font-medium mb-1">供應商名稱 *</label>
+                                <input type="text" name="name" required class="w-full p-2 border rounded bg-gray-50">
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium mb-1">公司統編</label>
+                                <input type="text" name="taxId" class="w-full p-2 border rounded bg-gray-50">
+                            </div>
+                        </div>
+                        <div class="grid grid-cols-2 gap-2">
+                            <div>
+                                <label class="block text-sm font-medium mb-1">電話</label>
+                                <input type="text" name="phone" class="w-full p-2 border rounded bg-gray-50">
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium mb-1">聯絡人</label>
+                                <input type="text" name="contact" class="w-full p-2 border rounded bg-gray-50">
+                            </div>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium mb-1">網址</label>
+                            <input type="url" name="website" placeholder="https://" class="w-full p-2 border rounded bg-gray-50">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium mb-1">供貨地址</label>
+                            <input type="text" name="address" class="w-full p-2 border rounded bg-gray-50">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium mb-1">付款方式</label>
+                            <select name="paymentType" onchange="toggleMonthlyDays(this, 'monthlyDaysWrapper')" 
+                                class="w-full p-2 border rounded bg-gray-50">
+                                <option value="現金">現金</option>
+                                <option value="匯款">匯款</option>
+                                <option value="月結">月結</option>
+                            </select>
+                        </div>
+                        <div id="monthlyDaysWrapper" style="display:none;">
+                            <label class="block text-sm font-medium mb-1">月結天數</label>
+                            <input type="number" name="monthlyDays" class="w-full p-2 border rounded bg-gray-50" placeholder="例如 30">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium mb-1">備註 (如低銷MOQ條件)</label>
+                            <textarea name="note" rows="2" class="w-full p-2 border rounded bg-gray-50"></textarea>
+                        </div>
+                        <button type="submit" class="w-full py-2 bg-blue-600 text-white rounded font-bold hover:bg-blue-700 transition">儲存供應商</button>
+                    </form>
+                </div>
+
+                <!-- 產品報價表單 -->
+                <div class="card p-6 border-t-4 border-orange-500">
+                    <h2 class="text-xl font-bold mb-4 text-orange-700">錄入產品報價</h2>
+                    <form id="productForm" class="space-y-4">
+                        <div>
+                            <label class="block text-sm font-medium mb-1">對應供應商 *</label>
+                            <div class="flex gap-2">
+                                <input type="text" id="supplierSearchInput" list="supplierListForProduct" required class="flex-1 p-2 border rounded bg-gray-50 focus:bg-white" placeholder="輸入供應商名稱搜尋...">
+                                <input type="hidden" id="supplierId" name="supplierId" required>
+                                <datalist id="supplierListForProduct">
+                                    <!-- 動態填入供應商選項 -->
+                                </datalist>
+                            </div>
+                        </div>
+                        <div class="grid grid-cols-2 gap-4">
+                            <div>
+                                <label class="block text-sm font-medium mb-1">產品名稱 *</label>
+                                <input type="text" name="prodName" required class="w-full p-2 border rounded bg-gray-50">
+                            </div>
+                             <div>
+                                <label class="block text-sm font-medium mb-1">交期 (例如: 3天, 2週) *</label>
+                                <input type="text" name="deliveryTime" placeholder="預設交期" class="w-full p-2 border rounded bg-gray-50">
+                            </div>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium mb-1">規格</label>
+                            <input type="text" name="spec" class="w-full p-2 border rounded bg-gray-50">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium mb-1">產品網址 (供參考)</label>
+                            <input type="url" name="prodUrl" placeholder="https://" class="w-full p-2 border rounded bg-gray-50">
+                        </div>
+                        <div class="grid grid-cols-3 gap-2">
+                            <div>
+                                <label class="block text-sm font-medium mb-1">單價</label>
+                                <input type="number" name="price" step="0.01" class="w-full p-2 border rounded bg-gray-50">
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium mb-1">稅務</label>
+                                <select name="isTaxIncl" class="w-full p-2 border rounded bg-gray-50">
+                                    <option value="含稅">含稅</option>
+                                    <option value="不含稅">不含稅</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium mb-1">參考運費</label>
+                                <input type="number" name="shipping" value="0" class="w-full p-2 border rounded bg-gray-50">
+                            </div>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium mb-1">產品備註</label>
+                            <textarea name="prodNote" rows="2" class="w-full p-2 border rounded bg-gray-50"></textarea>
+                        </div>
+                        <button type="submit" class="w-full py-2 bg-orange-600 text-white rounded font-bold hover:bg-orange-700 transition">儲存產品報價</button>
+                    </form>
+                </div>
+            </div>
+        </section>
+    </div>
+
+    <!-- Modal: 建立/修改 客戶報價單 (v11.1 加寬版 max-w-7xl) -->
+    <div id="modal-create-quote" class="modal-overlay">
+        <div class="bg-white rounded-lg w-full max-w-7xl p-6 mx-4 max-h-[95vh] overflow-y-auto">
+            <h2 class="text-xl font-bold mb-4 text-purple-700" id="quoteModalTitle">建立客戶報價單</h2>
+            <div class="bg-purple-50 p-2 mb-2 rounded border border-purple-200 text-xs text-purple-800">
+                系統將自動生成單號格式：QT + 民國年(3碼) + 月(2碼) + 日(2碼) + 流水號(2碼)。例如：QT115021301
+            </div>
+            <input type="hidden" id="quoteId">
+            <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
+                <div>
+                    <label class="block text-sm font-medium mb-1">客戶名稱 *</label>
+                    <input type="text" id="quoteClientName" class="w-full p-2 border rounded" placeholder="輸入客戶名稱">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium mb-1">報價日期</label>
+                    <input type="date" id="quoteDate" class="w-full p-2 border rounded" value="">
+                </div>
+                <div>
+                    <div>
+                        <label class="block text-sm font-medium mb-1">付款方式</label>
+                        <select name="paymentType" onchange="toggleMonthlyDays(this, 'quoteMonthlyDaysWrapper')" 
+                            class="w-full p-2 border rounded">
+                            <option value="現金">現金</option>
+                            <option value="匯款">匯款</option>
+                            <option value="月結">月結</option>
+                        </select>
+                    </div>
+                    <div id="quoteMonthlyDaysWrapper" style="display:none;">
+                        <label class="block text-sm font-medium mb-1">月結天數</label>
+                        <input type="number" name="monthlyDays" class="w-full p-2 border rounded" placeholder="例如 30">
+                    </div>
+                     <label class="block text-sm font-medium mb-1">備註</label>
+                     <input type="text" id="quoteNote" class="w-full p-2 border rounded" placeholder="例如: 專案A">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium mb-1">狀態</label>
+                    <select id="quoteStatus" class="w-full p-2 border rounded bg-gray-50" onchange="toggleLossReason()">
+                        <option value="open">處理中 (New)</option>
+                        <option value="quoted">已報價</option>
+                        <option value="waiting">等回應</option>
+                        <option value="lost">未成交</option>
+                        <option value="converted">已成交/轉採購</option>
+                    </select>
+                </div>
+            </div>
+            <div id="lossReasonDiv" class="mb-4 hidden">
+                <label class="block text-sm font-medium mb-1 text-red-600">未成交原因 *</label>
+                <input type="text" id="quoteLossReason" class="w-full p-2 border rounded border-red-200 bg-red-50" placeholder="例如: 價格太高、交期太久...">
+            </div>
+            
+            <div class="flex flex-col gap-4 border-t pt-4 pr-2">
+                <!-- 直式：先選擇產品，再顯示報價內容與毛利分析 -->
+                <div class="w-full flex flex-col mb-2">
+                    <h3 class="font-bold text-gray-700 mb-2">1. 選擇產品</h3>
+                    <input type="text" id="quoteSearchProduct" placeholder="請輸入關鍵字以篩選產品 (至少 2 字)" class="w-full p-2 border rounded mb-2" oninput="renderQuoteProductSelection()">
+                    <div id="quoteProductList" class="max-h-52 overflow-y-auto custom-scroll space-y-2 pr-2">
+                        <!-- 產品清單會在輸入篩選後顯示 -->
+                    </div>
+                </div>
+                <div class="w-full flex flex-col">
+                    <div class="flex justify-between items-center mb-2">
+                         <h3 class="font-bold text-gray-700">2. 報價內容與毛利分析</h3>
+                         <span class="text-xs text-purple-600 font-bold bg-purple-50 px-2 py-1 rounded border border-purple-200">
+                             即時計算毛利%
+                         </span>
+                    </div>
+                   
+                    <div class="mb-2 text-xs text-gray-500 bg-yellow-50 p-2 rounded border border-yellow-200 flex justify-between items-center">
+                        <span><span class="font-bold text-yellow-700">提示：</span> 修改「報價金額」會即時更新右側毛利。</span>
+                    </div>
+
+                    <div id="quoteSelectedList" class="flex-1 overflow-y-auto custom-scroll bg-gray-50 p-2 rounded border space-y-2">
+                        <p class="text-gray-400 text-center mt-10">尚未選擇產品</p>
+                    </div>
+                    
+                    <!-- 毛利總結區塊 -->
+                    <div id="quoteProfitSummary" class="mt-2 bg-gray-800 text-white p-3 rounded flex justify-between items-center shadow">
+                        <div class="text-sm">
+                            <div>總成本: <span id="summaryTotalCost" class="font-mono text-gray-300">$0</span></div>
+                            <div>總營收: <span id="summaryTotalSales" class="font-mono text-yellow-300 font-bold">$0</span></div>
+                        </div>
+                        <div class="text-right">
+                             <div class="text-xs text-gray-400">預估毛利額</div>
+                             <div id="summaryProfitVal" class="font-bold text-lg">$0</div>
+                        </div>
+                         <div class="text-right pl-4 border-l border-gray-600">
+                             <div class="text-xs text-gray-400">毛利率 %</div>
+                             <div id="summaryMarginVal" class="font-bold text-2xl text-green-400">0%</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="flex gap-2 pt-4 border-t mt-4">
+                <button onclick="saveClientQuote()" class="flex-1 py-2 bg-purple-600 text-white rounded font-bold hover:bg-purple-700">儲存報價單</button>
+                <button onclick="closeModal('modal-create-quote')" class="flex-1 py-2 bg-gray-200 text-gray-700 rounded font-bold hover:bg-gray-300">取消</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal: 建立/修改 供應商詢價單 (v11.5 新增狀態) -->
+    <div id="modal-create-inquiry" class="modal-overlay">
+        <div class="bg-white rounded-lg w-full max-w-3xl p-6 mx-4">
+            <h2 id="inquiryModalTitle" class="text-xl font-bold mb-4 text-indigo-700">建立供應商詢價單 (新產品)</h2>
+            <input type="hidden" id="inquiryId">
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                <div>
+                    <label class="block text-sm font-medium mb-1">詢價對象 (選擇現有供應商) *</label>
+                    <div class="flex gap-2">
+                        <input type="text" id="inquirySupplierName" list="supplierListOptions" class="flex-1 p-2 border rounded bg-gray-50 focus:bg-white" placeholder="輸入名稱搜尋或點擊右側新增">
+                        <datalist id="supplierListOptions">
+                            <!-- 動態填入供應商選項 -->
+                        </datalist>
+                        <button type="button" onclick="openQuickAddSupplier()" class="px-3 py-2 bg-green-600 text-white rounded hover:bg-green-700 text-sm whitespace-nowrap" title="建立新供應商">
+                            + 建立
+                        </button>
+                    </div>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium mb-1">詢價日期</label>
+                    <input type="date" id="inquiryDate" class="w-full p-2 border rounded" value="">
+                </div>
+            </div>
+
+             <!-- v11.5 新增：狀態選擇 -->
+            <div class="mb-4">
+                <label class="block text-sm font-medium mb-1">詢價狀態</label>
+                <select id="inquiryStatus" class="w-full p-2 border rounded bg-gray-50 focus:bg-white">
+                    <option value="waiting">等回覆 (Waiting)</option>
+                    <option value="replied">已回覆 (Replied)</option>
+                    <option value="price_high">價格高 (Price High)</option>
+                    <option value="no_stock">無供貨 (No Stock)</option>
+                    <option value="converted">已轉正式產品 (Converted)</option>
+                </select>
+            </div>
+            
+            <div class="mb-4">
+                <label class="block text-sm font-medium mb-1">詢價單備註</label>
+                <textarea id="inquiryNote" rows="2" class="w-full p-2 border rounded" placeholder="例如: 詢問是否有現貨、MOQ等..."></textarea>
+            </div>
+
+            <div class="bg-indigo-50 p-4 rounded mb-4">
+                <h3 class="font-bold text-indigo-800 mb-2 text-sm">新增詢價項目</h3>
+                <div class="grid grid-cols-12 gap-2 mb-2">
+                    <div class="col-span-5"><input type="text" id="inqItemName" placeholder="產品名稱" class="w-full p-1 border rounded text-sm"></div>
+                    <div class="col-span-5"><input type="text" id="inqItemSpec" placeholder="規格/型號" class="w-full p-1 border rounded text-sm"></div>
+                    <div class="col-span-2"><button onclick="addInquiryItemTemp()" class="w-full bg-indigo-600 text-white rounded text-sm py-1">加入</button></div>
+                </div>
+            </div>
+
+            <div class="max-h-60 overflow-y-auto border rounded mb-4">
+                <table class="w-full text-left text-sm">
+                    <thead class="bg-gray-100 sticky top-0">
+                        <tr>
+                            <th class="p-2">產品名稱</th>
+                            <th class="p-2">規格</th>
+                            <th class="p-2 w-10">刪除</th>
+                        </tr>
+                    </thead>
+                    <tbody id="inquiryTempList">
+                        <!-- 暫存項目 -->
+                    </tbody>
+                </table>
+            </div>
+
+            <div class="flex gap-2 pt-2">
+                <button onclick="saveSupplierInquiry()" class="flex-1 py-2 bg-indigo-600 text-white rounded font-bold hover:bg-indigo-700">儲存詢價單</button>
+                <button onclick="closeModal('modal-create-inquiry')" class="flex-1 py-2 bg-gray-200 text-gray-700 rounded font-bold hover:bg-gray-300">取消</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal: 快速新增供應商 (Nested) -->
+    <div id="modal-quick-add-supplier" class="modal-overlay nested">
+        <div class="bg-white rounded-lg w-full max-w-md p-6 mx-4 border-t-4 border-green-500 shadow-2xl">
+            <h2 class="text-xl font-bold mb-4 text-green-700">快速建立供應商</h2>
+            <form id="quickAddSupplierForm" class="space-y-3">
+                <div>
+                    <label class="block text-sm font-medium mb-1">供應商名稱 *</label>
+                    <input type="text" name="quickName" required class="w-full p-2 border rounded bg-gray-50 focus:bg-white">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium mb-1">聯絡人</label>
+                    <input type="text" name="quickContact" class="w-full p-2 border rounded bg-gray-50 focus:bg-white">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium mb-1">電話</label>
+                    <input type="text" name="quickPhone" class="w-full p-2 border rounded bg-gray-50 focus:bg-white">
+                </div>
+                <div class="flex gap-2 pt-4">
+                    <button type="submit" class="flex-1 py-2 bg-green-600 text-white rounded font-bold hover:bg-green-700">儲存並使用</button>
+                    <button type="button" onclick="closeModal('modal-quick-add-supplier')" class="flex-1 py-2 bg-gray-200 text-gray-700 rounded font-bold hover:bg-gray-300">取消</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- 供應商編輯 Modal -->
+    <div id="modal-edit-supplier" class="modal-overlay">
+        <div class="bg-white rounded-lg w-full max-w-lg p-6 mx-4">
+            <h2 class="text-xl font-bold mb-4 text-blue-700">修改供應商資料</h2>
+            <form id="editSupplierForm" class="space-y-4">
+                <input type="hidden" name="id">
+                <div class="grid grid-cols-2 gap-2">
+                    <div>
+                        <label class="block text-sm font-medium mb-1">供應商名稱 *</label>
+                        <input type="text" name="name" required class="w-full p-2 border rounded">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium mb-1">公司統編</label>
+                        <input type="text" name="taxId" class="w-full p-2 border rounded">
+                    </div>
+                </div>
+                <div class="grid grid-cols-2 gap-2">
+                    <div>
+                        <label class="block text-sm font-medium mb-1">電話</label>
+                        <input type="text" name="phone" class="w-full p-2 border rounded">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium mb-1">聯絡人</label>
+                        <input type="text" name="contact" class="w-full p-2 border rounded">
+                    </div>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium mb-1">網址</label>
+                    <input type="url" name="website" class="w-full p-2 border rounded">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium mb-1">供貨地址</label>
+                    <input type="text" name="address" class="w-full p-2 border rounded">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium mb-1">付款方式</label>
+                    <select name="paymentType" onchange="toggleMonthlyDays(this, 'editMonthlyDaysWrapper')" 
+                        class="w-full p-2 border rounded">
+                        <option value="現金">現金</option>
+                        <option value="匯款">匯款</option>
+                        <option value="月結">月結</option>
+                    </select>
+                </div>
+                <div id="editMonthlyDaysWrapper" style="display:none;">
+                    <label class="block text-sm font-medium mb-1">月結天數</label>
+                    <input type="number" name="monthlyDays" class="w-full p-2 border rounded" placeholder="例如 30">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium mb-1">備註</label>
+                    <textarea name="note" rows="2" class="w-full p-2 border rounded"></textarea>
+                </div>
+                <div class="flex gap-2 pt-2">
+                    <button type="submit" class="flex-1 py-2 bg-blue-600 text-white rounded font-bold hover:bg-blue-700">更新</button>
+                    <button type="button" onclick="closeModal('modal-edit-supplier')" class="flex-1 py-2 bg-gray-200 text-gray-700 rounded font-bold hover:bg-gray-300">取消</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- 快速新增產品 Modal -->
+    <div id="modal-add-product-direct" class="modal-overlay">
+        <div class="bg-white rounded-lg w-full max-w-lg p-6 mx-4 border-t-4 border-green-500">
+            <h2 class="text-xl font-bold mb-4 text-green-700">新增產品</h2>
+            <form id="addProductDirectForm" class="space-y-4">
+                <input type="hidden" name="supplierId">
+                <div>
+                    <label class="block text-sm font-medium mb-1 text-gray-500">供應商</label>
+                    <input type="text" id="directSupplierName" readonly class="w-full p-2 border rounded bg-gray-100 text-gray-600 cursor-not-allowed">
+                </div>
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-sm font-medium mb-1">產品名稱 *</label>
+                        <input type="text" name="prodName" required class="w-full p-2 border rounded">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium mb-1">交期</label>
+                        <input type="text" name="deliveryTime" placeholder="例如: 3天" class="w-full p-2 border rounded">
+                    </div>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium mb-1">規格</label>
+                    <input type="text" name="spec" class="w-full p-2 border rounded">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium mb-1">產品網址 (供參考)</label>
+                    <input type="url" name="prodUrl" placeholder="https://" class="w-full p-2 border rounded">
+                </div>
+                <div class="grid grid-cols-3 gap-2">
+                    <div>
+                        <label class="block text-sm font-medium mb-1">單價</label>
+                        <input type="number" name="price" step="0.01" class="w-full p-2 border rounded">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium mb-1">稅務</label>
+                        <select name="isTaxIncl" class="w-full p-2 border rounded">
+                            <option value="含稅">含稅</option>
+                            <option value="不含稅">不含稅</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium mb-1">參考運費</label>
+                        <input type="number" name="shipping" value="0" class="w-full p-2 border rounded">
+                    </div>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium mb-1">產品備註</label>
+                    <textarea name="prodNote" rows="2" class="w-full p-2 border rounded"></textarea>
+                </div>
+                <div class="flex gap-2 pt-2">
+                    <button type="submit" class="flex-1 py-2 bg-green-600 text-white rounded font-bold hover:bg-green-700">新增產品</button>
+                    <button type="button" onclick="closeModal('modal-add-product-direct')" class="flex-1 py-2 bg-gray-200 text-gray-700 rounded font-bold hover:bg-gray-300">取消</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- 產品編輯 Modal -->
+    <div id="modal-edit-product" class="modal-overlay">
+        <div class="bg-white rounded-lg w-full max-w-lg p-6 mx-4">
+            <h2 class="text-xl font-bold mb-4 text-orange-700">修改產品報價</h2>
+            <form id="editProductForm" class="space-y-4">
+                <input type="hidden" name="id">
+                <div>
+                    <label class="block text-sm font-medium mb-1">對應供應商 *</label>
+                    <input type="text" id="editSupplierSearchInput" list="editSupplierListForProduct" required class="w-full p-2 border rounded bg-gray-50 focus:bg-white" placeholder="輸入供應商名稱搜尋...">
+                    <input type="hidden" id="editSupplierId" name="supplierId" required>
+                    <datalist id="editSupplierListForProduct">
+                        <!-- 動態填入供應商選項 -->
+                    </datalist>
+                </div>
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-sm font-medium mb-1">產品名稱 *</label>
+                        <input type="text" name="prodName" required class="w-full p-2 border rounded">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium mb-1">交期</label>
+                        <input type="text" name="deliveryTime" class="w-full p-2 border rounded">
+                    </div>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium mb-1">規格</label>
+                    <input type="text" name="spec" class="w-full p-2 border rounded">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium mb-1">產品網址 (供參考)</label>
+                    <input type="url" name="prodUrl" placeholder="https://" class="w-full p-2 border rounded">
+                </div>
+                <div class="grid grid-cols-3 gap-2">
+                    <div>
+                        <label class="block text-sm font-medium mb-1">單價</label>
+                        <input type="number" name="price" step="0.01" class="w-full p-2 border rounded">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium mb-1">稅務</label>
+                        <select name="isTaxIncl" class="w-full p-2 border rounded">
+                            <option value="含稅">含稅</option>
+                            <option value="不含稅">不含稅</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium mb-1">參考運費</label>
+                        <input type="number" name="shipping" class="w-full p-2 border rounded">
+                    </div>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium mb-1">產品備註</label>
+                    <textarea name="prodNote" rows="2" class="w-full p-2 border rounded"></textarea>
+                </div>
+                <div class="flex gap-2 pt-2">
+                    <button type="submit" class="flex-1 py-2 bg-orange-600 text-white rounded font-bold hover:bg-orange-700">更新</button>
+                    <button type="button" onclick="closeModal('modal-edit-product')" class="flex-1 py-2 bg-gray-200 text-gray-700 rounded font-bold hover:bg-gray-300">取消</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- 通知元件 -->
+    <div id="toast" class="fixed bottom-5 right-5 hidden px-6 py-3 rounded-lg shadow-lg text-white transition-opacity duration-300 z-50"></div>
+
+    <script>
+        // 資料初始化
+        let data = JSON.parse(localStorage.getItem('procurementDataV2')) || {
+            suppliers: [],
+            products: [],
+            cart: [], // 採購清單暫存
+            orders: [], // 歷史訂單
+            clientQuotes: [], // 客戶報價單
+            supplierInquiries: [] // 供應商詢價單
+        };
+
+        // 舊資料遷移檢查
+        if (!data.orders) data.orders = [];
+        if (!data.clientQuotes) data.clientQuotes = [];
+        if (!data.supplierInquiries) data.supplierInquiries = [];
+
+        // 暫存變數
+        let tempQuoteItems = [];
+        let tempInquiryItems = [];
+        let selectedCartItems = new Set(); // 儲存已選採購品項的 productId
+
+        // v11.5 詢價狀態定義
+        const inquiryStatusMap = {
+            'waiting': { label: '等回覆', class: 'bg-gray-100 text-gray-600 border-gray-300' },
+            'replied': { label: '已回覆', class: 'bg-blue-100 text-blue-700 border-blue-300' },
+            'price_high': { label: '價格高', class: 'bg-orange-100 text-orange-700 border-orange-300' },
+            'no_stock': { label: '無供貨', class: 'bg-red-100 text-red-700 border-red-300' },
+            'converted': { label: '已轉正式產品', class: 'bg-green-100 text-green-700 border-green-300' }
+        };
+
+        // 全域函式: 顯示/隱藏月結天數欄位
+        function toggleMonthlyDays(selectElement, wrapperId) {
+            const wrapper = document.getElementById(wrapperId);
+            if (!wrapper) return;
+            
+            if (selectElement.value === '月結') {
+                wrapper.style.display = 'block';
+            } else {
+                wrapper.style.display = 'none';
+                // 清空輸入值以避免誤存
+                const input = wrapper.querySelector('input');
+                if(input) input.value = '';
+            }
+        }
+
+        // 初始化渲染
+        window.onload = () => {
+            renderSuppliers();
+            renderProducts();
+            renderCart();
+            renderOrders();
+            renderClientQuotes();
+            renderSupplierInquiries();
+            updateSupplierSelect();
+            updateSupplierDatalist(); // 初始化供應商建議清單
+            
+            // 設定日期預設值
+            const today = new Date().toISOString().split('T')[0];
+            document.getElementById('quoteDate').value = today;
+            document.getElementById('inquiryDate').value = today;
+        };
+
+        // 頁籤切換
+        function switchTab(tabId) {
+            document.querySelectorAll('.page-content').forEach(p => p.classList.add('hidden'));
+            document.querySelectorAll('.tab-btn').forEach(b => {
+                b.classList.remove('tab-active', 'text-blue-600', 'text-purple-600', 'text-indigo-600');
+                b.classList.add('text-gray-500');
+            });
+
+            const page = document.getElementById(`page-${tabId}`);
+            if (!page) return; // 不存在的 tabId 不做任何操作
+            page.classList.remove('hidden');
+
+            const activeBtn = document.getElementById(`tab-${tabId}`);
+            if (!activeBtn) return; // 保險起見，避免壞 id 導致錯誤
+
+            // 根據頁籤不同設定不同顏色
+            if (tabId === 'client-quotes') {
+                activeBtn.classList.add('tab-active', 'text-purple-600');
+            } else if (tabId === 'supplier-inquiries') {
+                activeBtn.classList.add('tab-active', 'text-indigo-600');
+            } else {
+                activeBtn.classList.add('tab-active', 'text-blue-600');
+            }
+            activeBtn.classList.remove('text-gray-500');
+            
+            if (tabId === 'add') updateSupplierSelect();
+            if (tabId === 'purchase') renderCart();
+            if (tabId === 'orders') renderOrders();
+            if (tabId === 'client-quotes') renderClientQuotes();
+            if (tabId === 'supplier-inquiries') {
+                renderSupplierInquiries();
+                updateSupplierDatalist();
+            }
+        }
+
+        // ================= 資料操作邏輯 =================
+
+        // 供應商表單處理 (新增) - v11.4: 加入建檔日
+        document.getElementById('supplierForm').addEventListener('submit', (e) => {
+            e.preventDefault();
+            const formData = new FormData(e.target);
+            const now = new Date().toISOString();
+            const newSupplier = {
+                id: 's_' + Date.now(),
+                name: formData.get('name'),
+                taxId: formData.get('taxId'),
+                phone: formData.get('phone'),
+                contact: formData.get('contact'),
+                website: formData.get('website'),
+                address: formData.get('address'),
+                paymentType: formData.get('paymentType'),
+                monthlyDays: formData.get('monthlyDays'),
+                note: formData.get('note'),
+                createdAt: now, // v11.4 新增
+                updatedAt: now  // v11.4 新增
+            };
+            data.suppliers.push(newSupplier);
+            saveData();
+            e.target.reset();
+            // 重置 paymentType 顯示
+            toggleMonthlyDays(document.querySelector('select[name="paymentType"]'), 'monthlyDaysWrapper');
+            
+            updateSupplierDatalist(); 
+            showToast('供應商已儲存！', 'bg-blue-500');
+            renderSuppliers();
+        });
+
+        // 快速新增供應商表單處理 (Nested Modal) - v11.4: 加入建檔日
+        document.getElementById('quickAddSupplierForm').addEventListener('submit', (e) => {
+            e.preventDefault();
+            const formData = new FormData(e.target);
+            const name = formData.get('quickName');
+            const now = new Date().toISOString();
+            
+            const newSupplier = {
+                id: 's_' + Date.now(),
+                name: name,
+                taxId: '',
+                phone: formData.get('quickPhone'),
+                contact: formData.get('quickContact'),
+                website: '',
+                address: '',
+                paymentType: '現金',
+                monthlyDays: '',
+                note: '快速建立',
+                createdAt: now,
+                updatedAt: now
+            };
+            data.suppliers.push(newSupplier);
+            saveData();
+            updateSupplierDatalist();
+            
+            // 自動帶入詢價單欄位
+            document.getElementById('inquirySupplierName').value = name;
+            
+            closeModal('modal-quick-add-supplier');
+            e.target.reset();
+            showToast('供應商已建立！', 'bg-green-600');
+        });
+
+        // 供應商表單處理 (修改) - v11.4: 更新修改日
+        document.getElementById('editSupplierForm').addEventListener('submit', (e) => {
+            e.preventDefault();
+            const formData = new FormData(e.target);
+            const id = formData.get('id');
+            const index = data.suppliers.findIndex(s => s.id === id);
+            if (index !== -1) {
+                data.suppliers[index] = {
+                    ...data.suppliers[index],
+                    name: formData.get('name'),
+                    taxId: formData.get('taxId'),
+                    phone: formData.get('phone'),
+                    contact: formData.get('contact'),
+                    website: formData.get('website'),
+                    address: formData.get('address'),
+                    paymentType: formData.get('paymentType'),
+                    monthlyDays: formData.get('monthlyDays'),
+                    note: formData.get('note'),
+                    updatedAt: new Date().toISOString() // v11.4 更新修改時間
+                };
+                saveData();
+                updateSupplierDatalist();
+                renderSuppliers();
+                renderProducts(); // 更新產品列表中的供應商名稱
+                closeModal('modal-edit-supplier');
+                showToast('供應商資料已更新！', 'bg-blue-600');
+            }
+        });
+
+        // 供應商搜尋相關事件監聽器
+        // 新增產品表單的供應商搜尋
+        const supplierSearchInput = document.getElementById('supplierSearchInput');
+        const supplierIdField = document.getElementById('supplierId');
+        if (supplierSearchInput) {
+            supplierSearchInput.addEventListener('change', (e) => {
+                const selectedName = e.target.value;
+                const selectedSupplier = data.suppliers.find(s => s.name === selectedName);
+                if (selectedSupplier) {
+                    supplierIdField.value = selectedSupplier.id;
+                } else {
+                    supplierIdField.value = '';
+                    e.target.value = '';
+                }
+            });
+            supplierSearchInput.addEventListener('input', (e) => {
+                const inputVal = e.target.value;
+                const supplierIdHidden = document.getElementById('supplierId');
+                // 如果输入值不在下拉选项中，清空hidden字段
+                const matchedSupplier = data.suppliers.find(s => s.name === inputVal);
+                if (!matchedSupplier && inputVal.length > 0) {
+                    supplierIdHidden.value = '';
+                }
+            });
+        }
+
+        // 編輯產品表單的供應商搜尋
+        const editSupplierSearchInput = document.getElementById('editSupplierSearchInput');
+        const editSupplierIdField = document.getElementById('editSupplierId');
+        if (editSupplierSearchInput) {
+            editSupplierSearchInput.addEventListener('change', (e) => {
+                const selectedName = e.target.value;
+                const selectedSupplier = data.suppliers.find(s => s.name === selectedName);
+                if (selectedSupplier) {
+                    editSupplierIdField.value = selectedSupplier.id;
+                } else {
+                    editSupplierIdField.value = '';
+                    e.target.value = '';
+                }
+            });
+            editSupplierSearchInput.addEventListener('input', (e) => {
+                const inputVal = e.target.value;
+                const supplierIdHidden = document.getElementById('editSupplierId');
+                // 如果输入值不在下拉选项中，清空hidden字段
+                const matchedSupplier = data.suppliers.find(s => s.name === inputVal);
+                if (!matchedSupplier && inputVal.length > 0) {
+                    supplierIdHidden.value = '';
+                }
+            });
+        }
+
+        // 產品表單處理 (新增 - 原始頁籤)
+        document.getElementById('productForm').addEventListener('submit', (e) => {
+            e.preventDefault();
+            const formData = new FormData(e.target);
+            const newProduct = {
+                id: 'p_' + Date.now(),
+                supplierId: formData.get('supplierId'),
+                prodName: formData.get('prodName'),
+                deliveryTime: formData.get('deliveryTime'),
+                spec: formData.get('spec'),
+                prodUrl: formData.get('prodUrl'),
+                price: parseFloat(formData.get('price')) || 0,
+                isTaxIncl: formData.get('isTaxIncl'),
+                shipping: parseFloat(formData.get('shipping')) || 0,
+                prodNote: formData.get('prodNote')
+            };
+            data.products.push(newProduct);
+            saveData();
+            e.target.reset();
+            showToast('產品報價已儲存！', 'bg-orange-500');
+            renderProducts();
+        });
+
+        // 產品表單處理 (修改)
+        document.getElementById('editProductForm').addEventListener('submit', (e) => {
+            e.preventDefault();
+            const formData = new FormData(e.target);
+            const id = formData.get('id');
+            const index = data.products.findIndex(p => p.id === id);
+            if (index !== -1) {
+                data.products[index] = {
+                    ...data.products[index],
+                    supplierId: formData.get('supplierId'),
+                    prodName: formData.get('prodName'),
+                    deliveryTime: formData.get('deliveryTime'), 
+                    spec: formData.get('spec'),
+                    prodUrl: formData.get('prodUrl'),
+                    price: parseFloat(formData.get('price')) || 0,
+                    isTaxIncl: formData.get('isTaxIncl'),
+                    shipping: parseFloat(formData.get('shipping')) || 0,
+                    prodNote: formData.get('prodNote')
+                };
+                saveData();
+                renderProducts();
+                closeModal('modal-edit-product');
+                showToast('產品報價已更新！', 'bg-orange-600');
+            }
+        });
+
+        // ================= 客戶報價單邏輯 (v11.4: 報價單號邏輯QT+日期+流水號) =================
+
+        // Helper: 生成報價單號
+        function generateQuoteID() {
+            const now = new Date();
+            // 民國年 = 西元年 - 1911
+            const year = now.getFullYear() - 1911;
+            const month = String(now.getMonth() + 1).padStart(2, '0');
+            const day = String(now.getDate()).padStart(2, '0');
+            const datePrefix = `QT${year}${month}${day}`;
+            
+            // 找出今天已經開了幾張單
+            // 過濾出開頭符合 datePrefix 的單號
+            const sameDayQuotes = data.clientQuotes.filter(q => q.id && q.id.startsWith(datePrefix));
+            
+            let maxSeq = 0;
+            sameDayQuotes.forEach(q => {
+                // 取出最後兩位數當作序號
+                const seqStr = q.id.substring(datePrefix.length); 
+                const seq = parseInt(seqStr);
+                if (!isNaN(seq) && seq > maxSeq) {
+                    maxSeq = seq;
+                }
+            });
+
+            const nextSeq = String(maxSeq + 1).padStart(2, '0');
+            return `${datePrefix}${nextSeq}`;
+        }
+
+        function openCreateQuoteModal() {
+            tempQuoteItems = [];
+            document.getElementById('quoteId').value = ''; 
+            document.getElementById('quoteModalTitle').textContent = '建立客戶報價單';
+            document.getElementById('quoteClientName').value = '';
+            document.getElementById('quoteNote').value = '';
+            document.getElementById('quoteSearchProduct').value = '';
+            document.getElementById('quoteStatus').value = 'open';
+            document.getElementById('quoteLossReason').value = '';
+            toggleLossReason(); 
+            
+            renderQuoteProductSelection();
+            renderQuoteSelected();
+            document.getElementById('modal-create-quote').classList.add('modal-active');
+        }
+
+        function openEditQuote(quoteId) {
+            const quote = data.clientQuotes.find(q => q.id === quoteId);
+            if (!quote) return;
+
+            tempQuoteItems = JSON.parse(JSON.stringify(quote.items)).map(item => ({
+                ...item,
+                costPrice: item.costPrice !== undefined ? item.costPrice : item.price,
+                salesPrice: item.salesPrice !== undefined ? item.salesPrice : item.price
+            }));
+            
+            document.getElementById('quoteId').value = quote.id;
+            document.getElementById('quoteModalTitle').textContent = `修改客戶報價單 (${quote.id})`;
+            document.getElementById('quoteClientName').value = quote.clientName;
+            document.getElementById('quoteDate').value = quote.date;
+            document.getElementById('quoteNote').value = quote.note;
+            document.getElementById('quoteStatus').value = quote.status || 'open';
+            document.getElementById('quoteLossReason').value = quote.lossReason || '';
+            toggleLossReason();
+
+            renderQuoteProductSelection();
+            renderQuoteSelected();
+            document.getElementById('modal-create-quote').classList.add('modal-active');
+        }
+
+        function toggleLossReason() {
+            const status = document.getElementById('quoteStatus').value;
+            const reasonDiv = document.getElementById('lossReasonDiv');
+            if (status === 'lost') {
+                reasonDiv.classList.remove('hidden');
+            } else {
+                reasonDiv.classList.add('hidden');
+            }
+        }
+
+        function renderQuoteProductSelection() {
+            const keyword = document.getElementById('quoteSearchProduct').value.trim().toLowerCase();
+            const container = document.getElementById('quoteProductList');
+            container.innerHTML = '';
+
+            // 不要預先列出所有產品：要求至少輸入 2 個字以上再顯示篩選結果
+            if (keyword.length < 2) {
+                container.innerHTML = '<p class="text-gray-400 text-center mt-6">請輸入至少 2 個字以篩選產品</p>';
+                return;
+            }
+
+            const filtered = data.products.filter(p => {
+                const name = (p.prodName || '').toLowerCase();
+                const spec = (p.spec || '').toLowerCase();
+                return name.includes(keyword) || spec.includes(keyword);
+            });
+
+            if (filtered.length === 0) {
+                container.innerHTML = '<p class="text-gray-500 text-center mt-6">找不到符合的產品</p>';
+                return;
+            }
+
+            filtered.forEach(p => {
+                const supplier = data.suppliers.find(s => s.id === p.supplierId)?.name || '未知';
+                const div = document.createElement('div');
+                div.className = 'flex justify-between items-center p-2 border rounded hover:bg-gray-50 text-sm';
+                div.innerHTML = `
+                    <div>
+                        <div class="font-bold">${p.prodName}</div>
+                        <div class="text-xs text-gray-500">${p.spec || ''} | ${supplier} | 成本: $${p.price}</div>
+                    </div>
+                    <button onclick="addToQuoteTemp('${p.id}')" class="px-2 py-1 bg-purple-100 text-purple-700 rounded hover:bg-purple-200 font-bold">+</button>
+                `;
+                container.appendChild(div);
+            });
+        }
+
+        function addToQuoteTemp(productId) {
+            const product = data.products.find(p => p.id === productId);
+            if(!product) return;
+            
+            const existing = tempQuoteItems.find(i => i.productId === productId);
+            if(existing) {
+                existing.quantity++;
+            } else {
+                tempQuoteItems.push({
+                    productId: productId,
+                    prodName: product.prodName,
+                    spec: product.spec,
+                    costPrice: product.price,
+                    salesPrice: product.price,
+                    quantity: 1
+                });
+            }
+            renderQuoteSelected();
+        }
+
+        function renderQuoteSelected() {
+            const container = document.getElementById('quoteSelectedList');
+            container.innerHTML = '';
+            
+            if(tempQuoteItems.length === 0) {
+                container.innerHTML = '<p class="text-gray-400 text-center mt-10">尚未選擇產品</p>';
+                // Reset summary
+                document.getElementById('summaryTotalCost').textContent = '$0';
+                document.getElementById('summaryTotalSales').textContent = '$0';
+                document.getElementById('summaryProfitVal').textContent = '$0';
+                document.getElementById('summaryMarginVal').textContent = '0%';
+                document.getElementById('summaryMarginVal').className = 'font-bold text-2xl text-gray-400';
+                return;
+            }
+
+            let totalCost = 0;
+            let totalSales = 0;
+
+            tempQuoteItems.forEach((item, index) => {
+                // v11.1 計算總計
+                const costSub = item.costPrice * item.quantity;
+                const salesSub = item.salesPrice * item.quantity;
+                totalCost += costSub;
+                totalSales += salesSub;
+
+                // 該項目的毛利 (Tooltip or simple display)
+                const itemProfit = salesSub - costSub;
+                const itemMargin = salesSub > 0 ? ((itemProfit / salesSub) * 100).toFixed(0) : 0;
+                const marginColor = itemMargin < 0 ? 'text-red-500' : 'text-green-600';
+
+                const div = document.createElement('div');
+                div.className = 'flex flex-col sm:flex-row sm:justify-between sm:items-center p-2 bg-white rounded shadow-sm text-sm gap-2 border-l-4 ' + (itemProfit < 0 ? 'border-red-400' : 'border-purple-400');
+                div.innerHTML = `
+                    <div class="flex-1">
+                        <div class="font-bold">${item.prodName}</div>
+                        <div class="text-xs text-gray-500">${item.spec || ''}</div>
+                        <div class="flex gap-2 mt-1 items-center">
+                            <span class="text-xs text-gray-400">成本: $${item.costPrice}</span>
+                            <span class="text-xs font-bold ${marginColor}">毛利: ${itemMargin}%</span>
+                        </div>
+                    </div>
+                    <div class="flex items-center gap-2">
+                         <div class="flex flex-col">
+                            <span class="text-[10px] text-gray-500">報價</span>
+                            <input type="number" min="0" step="0.01" value="${item.salesPrice}" class="w-20 p-1 border rounded text-right text-purple-700 font-bold"
+                            onchange="updateQuoteTempPrice(${index}, this.value)">
+                         </div>
+                         <div class="flex flex-col">
+                            <span class="text-[10px] text-gray-500">數量</span>
+                            <input type="number" min="1" value="${item.quantity}" class="w-16 p-1 border rounded text-center"
+                            onchange="updateQuoteTempQty(${index}, this.value)">
+                         </div>
+                         <button onclick="removeQuoteTemp(${index})" class="text-red-500 hover:text-red-700 ml-1">✕</button>
+                    </div>
+                `;
+                container.appendChild(div);
+            });
+
+            // v11.1 更新毛利分析儀表板
+            const profit = totalSales - totalCost;
+            const margin = totalSales > 0 ? ((profit / totalSales) * 100).toFixed(1) : 0;
+            
+            document.getElementById('summaryTotalCost').textContent = '$' + Math.round(totalCost).toLocaleString();
+            document.getElementById('summaryTotalSales').textContent = '$' + Math.round(totalSales).toLocaleString();
+            
+            const profitEl = document.getElementById('summaryProfitVal');
+            profitEl.textContent = '$' + Math.round(profit).toLocaleString();
+            profitEl.className = profit < 0 ? 'font-bold text-lg text-red-400' : 'font-bold text-lg text-white';
+
+            const marginEl = document.getElementById('summaryMarginVal');
+            marginEl.textContent = margin + '%';
+            if (margin < 0) marginEl.className = 'font-bold text-2xl text-red-500';
+            else if (margin < 15) marginEl.className = 'font-bold text-2xl text-yellow-400';
+            else marginEl.className = 'font-bold text-2xl text-green-400';
+        }
+
+        function updateQuoteTempQty(index, val) {
+            tempQuoteItems[index].quantity = parseInt(val) || 1;
+            renderQuoteSelected(); // 重繪以更新毛利
+        }
+
+        function updateQuoteTempPrice(index, val) {
+            tempQuoteItems[index].salesPrice = parseFloat(val) || 0;
+            renderQuoteSelected(); // 重繪以更新毛利
+        }
+
+        function removeQuoteTemp(index) {
+            tempQuoteItems.splice(index, 1);
+            renderQuoteSelected();
+        }
+
+        function saveClientQuote() {
+            const clientName = document.getElementById('quoteClientName').value;
+            let quoteId = document.getElementById('quoteId').value;
+            const status = document.getElementById('quoteStatus').value;
+            const lossReason = document.getElementById('quoteLossReason').value;
+
+            if(!clientName) return showToast('請輸入客戶名稱', 'bg-red-500');
+            if(tempQuoteItems.length === 0) return showToast('請至少選擇一項產品', 'bg-red-500');
+            if(status === 'lost' && !lossReason) return showToast('請填寫未成交原因', 'bg-red-500');
+
+            // v11.4: 如果沒有 quoteId (新單)，則生成新格式
+            let isNew = false;
+            if (!quoteId) {
+                quoteId = generateQuoteID();
+                isNew = true;
+            }
+
+            const quoteData = {
+                id: quoteId,
+                clientName: clientName,
+                date: document.getElementById('quoteDate').value,
+                note: document.getElementById('quoteNote').value,
+                status: status,
+                lossReason: status === 'lost' ? lossReason : '',
+                items: [...tempQuoteItems]
+            };
+
+            if (!isNew) {
+                const index = data.clientQuotes.findIndex(q => q.id === quoteId);
+                if (index !== -1) {
+                    data.clientQuotes[index] = quoteData;
+                    showToast('報價單已更新', 'bg-purple-600');
+                }
+            } else {
+                data.clientQuotes.unshift(quoteData);
+                showToast(`客戶報價單 ${quoteId} 已建立`, 'bg-purple-600');
+            }
+
+            saveData();
+            closeModal('modal-create-quote');
+            renderClientQuotes();
+        }
+
+        function renderClientQuotes() {
+            const keyword = document.getElementById('searchQuoteKeyword')?.value.toLowerCase() || '';
+            const statusFilter = document.getElementById('filterQuoteStatus')?.value || 'all';
+            const startDate = document.getElementById('filterQuoteStart')?.value;
+            const endDate = document.getElementById('filterQuoteEnd')?.value;
+
+            const container = document.getElementById('clientQuoteList');
+            container.innerHTML = '';
+
+            const filtered = (data.clientQuotes || []).filter(q => {
+                const items = q.items || [];
+
+                // 關鍵字篩選 (客戶名稱 或 單號)
+                const matchKeyword = (q.clientName || '').toLowerCase().includes(keyword) || (q.id || '').toLowerCase().includes(keyword);
+                
+                // 狀態篩選
+                const matchStatus = statusFilter === 'all' || q.status === statusFilter;
+
+                // 日期篩選
+                let matchDate = true;
+                if (startDate && q.date < startDate) matchDate = false;
+                if (endDate && q.date > endDate) matchDate = false;
+
+                return matchKeyword && matchStatus && matchDate;
+            });
+
+            if (filtered.length === 0) {
+                container.innerHTML = '<div class="text-center text-gray-400 py-8">沒有符合條件的報價單</div>';
+                return;
+            }
+
+            filtered.forEach(q => {
+                const div = document.createElement('div');
+                div.className = 'card p-4 border-l-4 border-purple-500';
+                
+                const itemsData = q.items || [];
+                const itemsSummary = itemsData.map(i => `${i.prodName} x${i.quantity}`).join(', ');
+                const totalAmt = itemsData.reduce((acc, i) => acc + ((i.salesPrice !== undefined ? i.salesPrice : i.price || 0) * (i.quantity || 0)), 0);
+
+                let statusText = '';
+                let statusClass = 'bg-gray-100 text-gray-600';
+                
+                switch(q.status) {
+                    case 'open': statusText = '處理中'; statusClass = 'bg-yellow-100 text-yellow-800'; break;
+                    case 'quoted': statusText = '已報價'; statusClass = 'bg-blue-100 text-blue-800'; break;
+                    case 'waiting': statusText = '等回應'; statusClass = 'bg-indigo-100 text-indigo-800'; break;
+                    case 'lost': statusText = '未成交'; statusClass = 'bg-red-100 text-red-800'; break;
+                    case 'converted': statusText = '已成交'; statusClass = 'bg-green-100 text-green-800'; break;
+                    default: statusText = '未處理';
+                }
+
+                div.innerHTML = `
+                    <div class="flex flex-col md:flex-row justify-between md:items-center mb-2">
+                        <div>
+                            <h3 class="font-bold text-lg text-gray-800">${q.clientName}</h3>
+                            <div class="text-xs text-gray-500">日期: ${q.date} | 編號: <span class="font-mono font-bold">${q.id}</span></div>
+                        </div>
+                        <div class="text-right mt-2 md:mt-0">
+                            <div class="font-bold text-purple-700">$${Math.round(totalAmt).toLocaleString()}</div>
+                            <span class="text-xs px-2 py-0.5 rounded ${statusClass}">
+                                ${statusText}
+                            </span>
+                        </div>
+                    </div>
+                    <div class="text-sm text-gray-600 mb-3 line-clamp-2">${itemsSummary}</div>
+                    <div class="text-xs text-gray-400 mb-2">備註: ${q.note || '無'}</div>
+                    ${q.status === 'lost' ? `<div class="text-xs text-red-500 mb-2 bg-red-50 p-1 rounded">原因: ${q.lossReason}</div>` : ''}
+                    
+                    <div class="flex flex-wrap justify-end gap-2 border-t pt-2">
+                        <button onclick="exportQuoteExcel('${q.id}')" class="px-3 py-1 bg-green-50 text-green-600 hover:bg-green-100 rounded text-sm border border-green-200">
+                            匯出 Excel
+                        </button>
+                        <button onclick="openEditQuote('${q.id}')" class="px-3 py-1 bg-gray-100 text-gray-700 hover:bg-gray-200 rounded text-sm">
+                            修改
+                        </button>
+                        <button onclick="deleteQuote('${q.id}')" class="px-3 py-1 text-red-500 hover:bg-red-50 rounded text-sm">刪除</button>
+                        ${q.status !== 'converted' ? 
+                            `<button onclick="convertQuoteToCart('${q.id}')" class="px-3 py-1 bg-purple-600 text-white rounded hover:bg-purple-700 text-sm font-bold shadow-sm">
+                                轉入採購
+                            </button>` : 
+                            '<button disabled class="px-3 py-1 bg-gray-200 text-gray-400 rounded text-sm cursor-not-allowed">已轉單</button>'
+                        }
+                    </div>
+                `;
+                container.appendChild(div);
+            });
+        }
+
+        function convertQuoteToCart(quoteId) {
+            const quote = data.clientQuotes.find(q => q.id === quoteId);
+            if(!quote) return;
+
+            if(!confirm(`確定要將 ${quote.clientName} 的報價單轉入採購清單嗎？`)) return;
+
+            (quote.items || []).forEach(item => {
+                const prod = data.products.find(p => p.id === item.productId);
+                if(prod) {
+                    const existing = data.cart.find(c => c.productId === item.productId);
+                    if(existing) {
+                        existing.quantity += item.quantity;
+                        existing.customNote = (existing.customNote ? existing.customNote + '; ' : '') + `追加: 報價單 ${quoteId}`;
+                    } else {
+                        data.cart.push({
+                            productId: item.productId,
+                            quantity: item.quantity,
+                            customPrice: prod.price, 
+                            customShipping: prod.shipping,
+                            customNote: `來源: 客戶報價 ${quote.clientName} (${quoteId})`,
+                            taxStatus: prod.isTaxIncl || '含稅' 
+                        });
+                    }
+                }
+            });
+
+            quote.status = 'converted';
+            saveData();
+            renderClientQuotes();
+            updateCartCount();
+            showToast('已成功轉入採購清單！', 'bg-green-600');
+            switchTab('purchase');
+        }
+
+        function deleteQuote(id) {
+            if(confirm('確定刪除此報價單？')) {
+                data.clientQuotes = data.clientQuotes.filter(q => q.id !== id);
+                saveData();
+                renderClientQuotes();
+            }
+        }
+
+        // ================= 供應商詢價單邏輯 (v11.5 狀態升級) =================
+
+        function updateSupplierDatalist() {
+            const datalist = document.getElementById('supplierListOptions');
+            datalist.innerHTML = '';
+            data.suppliers.forEach(s => {
+                const option = document.createElement('option');
+                option.value = s.name; 
+                datalist.appendChild(option);
+            });
+        }
+
+        function openCreateInquiryModal() {
+            tempInquiryItems = [];
+            document.getElementById('inquiryId').value = ''; 
+            document.getElementById('inquiryModalTitle').innerText = '建立供應商詢價單 (新產品)';
+            document.getElementById('inquirySupplierName').value = '';
+            document.getElementById('inqItemName').value = '';
+            document.getElementById('inqItemSpec').value = '';
+            document.getElementById('inquiryNote').value = '';
+            // v11.5: 預設狀態
+            document.getElementById('inquiryStatus').value = 'waiting';
+            
+            const today = new Date().toISOString().split('T')[0];
+            document.getElementById('inquiryDate').value = today;
+
+            updateSupplierDatalist();
+            renderInquiryTempList();
+            document.getElementById('modal-create-inquiry').classList.add('modal-active');
+        }
+
+        function openEditInquiry(id) {
+            const inq = data.supplierInquiries.find(i => i.id === id);
+            if (!inq) return;
+
+            document.getElementById('inquiryId').value = inq.id;
+            document.getElementById('inquiryModalTitle').innerText = '修改供應商詢價單';
+            document.getElementById('inquirySupplierName').value = inq.supplierName;
+            document.getElementById('inquiryDate').value = inq.date;
+            document.getElementById('inquiryNote').value = inq.note || '';
+            document.getElementById('inqItemName').value = '';
+            document.getElementById('inqItemSpec').value = '';
+            // v11.5: 載入狀態，舊資料預設 waiting
+            document.getElementById('inquiryStatus').value = inq.status || 'waiting';
+
+            tempInquiryItems = JSON.parse(JSON.stringify(inq.items)).map((item, index) => {
+                if (inq.convertedItems && inq.convertedItems.includes(index)) {
+                    item._converted = true;
+                }
+                return item;
+            });
+
+            updateSupplierDatalist();
+            renderInquiryTempList();
+            document.getElementById('modal-create-inquiry').classList.add('modal-active');
+        }
+        
+        function openQuickAddSupplier() {
+            document.getElementById('quickAddSupplierForm').reset();
+            document.getElementById('modal-quick-add-supplier').classList.add('modal-active');
+        }
+
+        function addInquiryItemTemp() {
+            const name = document.getElementById('inqItemName').value;
+            const spec = document.getElementById('inqItemSpec').value;
+            if(!name) return showToast('請輸入產品名稱', 'bg-red-500');
+
+            tempInquiryItems.push({ name, spec });
+            document.getElementById('inqItemName').value = '';
+            document.getElementById('inqItemSpec').value = '';
+            document.getElementById('inqItemName').focus();
+            renderInquiryTempList();
+        }
+
+        function renderInquiryTempList() {
+            const container = document.getElementById('inquiryTempList');
+            container.innerHTML = '';
+            
+            tempInquiryItems.forEach((item, index) => {
+                const tr = document.createElement('tr');
+                tr.className = 'border-b';
+                
+                const statusBadge = item._converted 
+                    ? '<span class="text-xs bg-green-100 text-green-700 px-1 rounded ml-1">已轉</span>' 
+                    : '';
+
+                tr.innerHTML = `
+                    <td class="p-2">${item.name} ${statusBadge}</td>
+                    <td class="p-2">${item.spec}</td>
+                    <td class="p-2 text-center"><button onclick="removeInquiryTemp(${index})" class="text-red-500 hover:text-red-700">✕</button></td>
+                `;
+                container.appendChild(tr);
+            });
+        }
+
+        function removeInquiryTemp(index) {
+            tempInquiryItems.splice(index, 1);
+            renderInquiryTempList();
+        }
+
+        function saveSupplierInquiry() {
+            const supplierName = document.getElementById('inquirySupplierName').value;
+            const note = document.getElementById('inquiryNote').value;
+            const inquiryId = document.getElementById('inquiryId').value;
+            const status = document.getElementById('inquiryStatus').value; // v11.5
+
+            if(!supplierName) return showToast('請輸入供應商名稱', 'bg-red-500');
+            if(tempInquiryItems.length === 0) return showToast('請至少新增一個項目', 'bg-red-500');
+
+            const cleanItems = [];
+            const newConvertedItems = [];
+
+            tempInquiryItems.forEach((item, index) => {
+                if (item._converted) {
+                    newConvertedItems.push(index);
+                }
+                cleanItems.push({
+                    name: item.name,
+                    spec: item.spec
+                });
+            });
+
+            const inquiryData = {
+                id: inquiryId || ('inq_' + Date.now()),
+                supplierName: supplierName,
+                date: document.getElementById('inquiryDate').value,
+                note: note,
+                status: status, // v11.5 儲存狀態
+                items: cleanItems,
+                convertedItems: newConvertedItems 
+            };
+
+            if (inquiryId) {
+                const index = data.supplierInquiries.findIndex(i => i.id === inquiryId);
+                if (index !== -1) {
+                    data.supplierInquiries[index] = inquiryData;
+                    showToast('詢價單已更新', 'bg-indigo-600');
+                }
+            } else {
+                data.supplierInquiries.unshift(inquiryData);
+                showToast('供應商詢價單已建立', 'bg-indigo-600');
+            }
+
+            saveData();
+            closeModal('modal-create-inquiry');
+            renderSupplierInquiries();
+        }
+
+        // v11.5: 更新 renderSupplierInquiries 支援搜尋與狀態篩選
+        function renderSupplierInquiries() {
+            const keyword = document.getElementById('searchInquiryKeyword')?.value.toLowerCase() || '';
+            const filterStatus = document.getElementById('filterInquiryStatus')?.value || 'all';
+            const container = document.getElementById('supplierInquiryList');
+            container.innerHTML = '';
+
+            // 篩選邏輯
+            const filtered = data.supplierInquiries.filter(inq => {
+                const nameMatch = inq.supplierName.toLowerCase().includes(keyword);
+                const noteMatch = (inq.note || '').toLowerCase().includes(keyword);
+                const idMatch = inq.id.toLowerCase().includes(keyword);
+                const itemMatch = (inq.items || []).some(item => (item.name || '').toLowerCase().includes(keyword));
+                
+                // v11.5 狀態篩選
+                const currentStatus = inq.status || 'waiting'; // 舊資料預設為 waiting
+                const statusMatch = filterStatus === 'all' || currentStatus === filterStatus;
+
+                return (nameMatch || noteMatch || idMatch || itemMatch) && statusMatch;
+            });
+
+            if (filtered.length === 0) {
+                container.innerHTML = '<div class="text-center text-gray-400 py-8">沒有符合的詢價紀錄</div>';
+                return;
+            }
+
+            filtered.forEach(inq => {
+                const div = document.createElement('div');
+                div.className = 'card p-4 border-l-4 border-indigo-500';
+                
+                // v11.5 狀態顯示邏輯
+                const statusKey = inq.status || 'waiting';
+                const statusInfo = inquiryStatusMap[statusKey] || inquiryStatusMap['waiting'];
+
+                let itemsHtml = '';
+                inq.items.forEach((item, idx) => {
+                    const isConverted = inq.convertedItems && inq.convertedItems.includes(idx);
+                    itemsHtml += `
+                        <div class="flex justify-between items-center py-1 border-b last:border-0 border-gray-100 text-sm">
+                            <span class="text-gray-700">▪ ${item.name} <span class="text-gray-400 text-xs">(${item.spec})</span></span>
+                            ${isConverted ? 
+                                '<span class="text-xs bg-green-100 text-green-700 px-2 rounded">已轉產品</span>' : 
+                                `<button onclick="convertInquiryToProduct('${inq.id}', ${idx})" class="text-xs bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded hover:bg-indigo-200">轉為正式產品</button>`
+                            }
+                        </div>
+                    `;
+                });
+
+                div.innerHTML = `
+                    <div class="flex flex-col md:flex-row justify-between md:items-center mb-2 gap-2">
+                        <div class="flex items-center gap-2">
+                            <h3 class="font-bold text-lg text-gray-800">${inq.supplierName}</h3>
+                             <!-- v11.5 狀態 Badge -->
+                            <span class="text-xs px-2 py-0.5 rounded border ${statusInfo.class} font-bold">${statusInfo.label}</span>
+                        </div>
+                        <div class="flex items-center gap-2">
+                            <div class="text-xs text-gray-500">日期: ${inq.date}</div>
+                            <!-- v11.5 快速狀態切換選單 -->
+                            <select onchange="quickUpdateInquiryStatus('${inq.id}', this.value)" class="text-xs border rounded p-1 bg-white ml-2 text-gray-600 focus:text-indigo-600 outline-none">
+                                <option value="waiting" ${statusKey === 'waiting'?'selected':''}>等回覆</option>
+                                <option value="replied" ${statusKey === 'replied'?'selected':''}>已回覆</option>
+                                <option value="price_high" ${statusKey === 'price_high'?'selected':''}>價格高</option>
+                                <option value="no_stock" ${statusKey === 'no_stock'?'selected':''}>無供貨</option>
+                                <option value="converted" ${statusKey === 'converted'?'selected':''}>已轉產品</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="text-xs text-gray-500 mb-2">備註: ${inq.note || '無'}</div>
+                    <div class="bg-gray-50 p-2 rounded mb-3 space-y-1">
+                        ${itemsHtml}
+                    </div>
+                    <div class="flex justify-end gap-2 border-t pt-2">
+                         <button onclick="openEditInquiry('${inq.id}')" class="px-3 py-1 bg-gray-100 text-gray-700 hover:bg-gray-200 rounded text-sm">修改</button>
+                         <button onclick="deleteInquiry('${inq.id}')" class="px-3 py-1 text-red-500 hover:bg-red-50 rounded text-sm">刪除詢價單</button>
+                    </div>
+                `;
+                container.appendChild(div);
+            });
+        }
+        
+        // v11.5 快速更新狀態功能
+        function quickUpdateInquiryStatus(id, newStatus) {
+            const inq = data.supplierInquiries.find(i => i.id === id);
+            if (inq) {
+                inq.status = newStatus;
+                saveData();
+                renderSupplierInquiries(); // 重新渲染以更新顏色
+                showToast('詢價單狀態已更新', 'bg-indigo-600');
+            }
+        }
+
+        function convertInquiryToProduct(inquiryId, itemIndex) {
+            const inq = data.supplierInquiries.find(i => i.id === inquiryId);
+            if(!inq) return;
+            const item = inq.items[itemIndex];
+
+            const form = document.getElementById('addProductDirectForm');
+            form.reset();
+            
+            const existingSupplier = data.suppliers.find(s => s.name === inq.supplierName);
+            if (existingSupplier) {
+                form.supplierId.value = existingSupplier.id;
+                document.getElementById('directSupplierName').value = existingSupplier.name;
+            } else {
+                alert(`注意：系統中找不到名為「${inq.supplierName}」的供應商資料，請先至供應商管理新增，或於下拉選單選擇現有供應商。`);
+                form.supplierId.value = "";
+                document.getElementById('directSupplierName').value = `${inq.supplierName} (尚未建立資料)`;
+            }
+
+            form.prodName.value = item.name;
+            form.spec.value = item.spec;
+            form.prodNote.value = `來源: 詢價單 ${inquiryId}`;
+
+            form.dataset.inquiryId = inquiryId;
+            form.dataset.inquiryItemIndex = itemIndex;
+
+            document.getElementById('modal-add-product-direct').classList.add('modal-active');
+        }
+
+        document.getElementById('addProductDirectForm').onsubmit = (e) => {
+            e.preventDefault();
+            const formData = new FormData(e.target);
+            
+            if (!formData.get('supplierId')) {
+                const tempName = document.getElementById('directSupplierName').value.replace(' (尚未建立資料)', '');
+                if (tempName) {
+                    const newSupId = 's_' + Date.now();
+                    const now = new Date().toISOString();
+                    data.suppliers.push({ 
+                        id: newSupId, 
+                        name: tempName, 
+                        taxId: '', 
+                        contact: '', 
+                        phone: '', 
+                        address: '', 
+                        note: '由詢價單自動建立',
+                        createdAt: now,
+                        updatedAt: now
+                    });
+                    formData.set('supplierId', newSupId); 
+                    updateSupplierDatalist(); 
+                } else {
+                    return showToast('供應商資料有誤', 'bg-red-500');
+                }
+            }
+
+            const newProduct = {
+                id: 'p_' + Date.now(),
+                supplierId: formData.get('supplierId'),
+                prodName: formData.get('prodName'),
+                deliveryTime: formData.get('deliveryTime'),
+                spec: formData.get('spec'),
+                prodUrl: formData.get('prodUrl'),
+                price: parseFloat(formData.get('price')) || 0,
+                isTaxIncl: formData.get('isTaxIncl'),
+                shipping: parseFloat(formData.get('shipping')) || 0,
+                prodNote: formData.get('prodNote')
+            };
+            data.products.push(newProduct);
+
+            const form = e.target;
+            if (form.dataset.inquiryId) {
+                const inq = data.supplierInquiries.find(i => i.id === form.dataset.inquiryId);
+                if (inq) {
+                    if (!inq.convertedItems) inq.convertedItems = [];
+                    inq.convertedItems.push(parseInt(form.dataset.inquiryItemIndex));
+                    delete form.dataset.inquiryId;
+                    delete form.dataset.inquiryItemIndex;
+                    
+                    // v11.5 優化：若轉換成功，提示是否將整張詢價單改為「已轉正式產品」
+                    if (confirm('產品已建立！是否將此詢價單狀態更新為「已轉正式產品」？')) {
+                        inq.status = 'converted';
+                    }
+                    
+                    renderSupplierInquiries(); 
+                }
+            }
+
+            saveData();
+            e.target.reset();
+            closeModal('modal-add-product-direct');
+            showToast('產品已成功新增！', 'bg-green-600');
+            renderProducts();
+            renderSuppliers(); 
+        };
+
+
+        function deleteInquiry(id) {
+            if(confirm('確定刪除此詢價單？')) {
+                data.supplierInquiries = data.supplierInquiries.filter(i => i.id !== id);
+                saveData();
+                renderSupplierInquiries();
+            }
+        }
+
+        // ================= 渲染邏輯 (更新) =================
+
+        function renderWithFragment(container, renderFn) {
+            if (!container) return;
+            const fragment = document.createDocumentFragment();
+            renderFn(fragment);
+            container.innerHTML = '';
+            container.appendChild(fragment);
+        }
+
+        function getInputValue(id) {
+            return document.getElementById(id)?.value || '';
+        }
+
+        function renderList(containerId, items, itemRenderer, emptyHtml) {
+            const container = document.getElementById(containerId);
+            if (!container) return;
+
+            const safeItems = Array.isArray(items) ? items : [];
+            if (safeItems.length === 0) {
+                container.innerHTML = emptyHtml || '';
+                return;
+            }
+
+            renderWithFragment(container, (fragment) => {
+                safeItems.forEach(item => itemRenderer(fragment, item));
+            });
+        }
+
+        function filterSafe(array, predicate) {
+            return (Array.isArray(array) ? array : []).filter(predicate);
+        }
+
+        function formatDateTime(value) {
+            if (!value) return '-';
+            const date = new Date(value);
+            if (Number.isNaN(date.getTime())) return '-';
+            return date.toLocaleString('zh-TW', { hour12: false, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+        }
+
+        // 供應商渲染 - v11.4: 顯示建檔日與修改日
+        function renderSuppliers() {
+            const keyword = getInputValue('searchSupplier').toLowerCase();
+
+            const filtered = filterSafe(data.suppliers, s => 
+                (s.name || '').toLowerCase().includes(keyword) || 
+                (s.taxId || '').toLowerCase().includes(keyword) ||
+                (s.contact || '').toLowerCase().includes(keyword)
+            );
+
+            renderList('supplierList', filtered, (fragment, s) => {
+                const item = document.createElement('div');
+                item.className = 'bg-white border rounded shadow-sm overflow-hidden';
+                const paymentInfo = s.paymentType ? `${s.paymentType} ${s.paymentType === '月結' ? (s.monthlyDays + '天') : ''}` : '未設定';
+
+                const createdDate = formatDateTime(s.createdAt);
+                const updatedDate = formatDateTime(s.updatedAt);
+
+                item.innerHTML = `
+                    <div class="flex justify-between items-center p-4 cursor-pointer hover:bg-gray-50 transition" onclick="toggleSupplierDetails('${s.id}')">
+                        <div class="flex flex-col md:flex-row md:items-center gap-2 md:gap-4">
+                             <div class="font-bold text-gray-800 text-lg">${s.name}</div>
+                             ${s.taxId ? `<span class="text-sm bg-gray-100 text-gray-600 px-2 py-0.5 rounded w-fit">統編: ${s.taxId}</span>` : ''}
+                        </div>
+                        <div class="text-gray-400">
+                            <svg id="icon-${s.id}" xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 transform transition-transform duration-200" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+                            </svg>
+                        </div>
+                    </div>
+                    <div id="details-${s.id}" class="hidden border-t bg-gray-50 p-4">
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm text-gray-700 mb-4">
+                            <p><strong>聯絡人:</strong> ${s.contact || '-'}</p>
+                            <p><strong>電話:</strong> ${s.phone || '-'}</p>
+                            <p><strong>地址:</strong> ${s.address || '-'}</p>
+                            <p><strong>網址:</strong> ${s.website ? `<a href="${s.website}" target="_blank" class="text-blue-600 hover:underline">連結</a>` : '-'}</p>
+                            <p><strong>付款條件:</strong> <span class="font-bold text-blue-700">${paymentInfo}</span></p>
+                            <p class="text-gray-500 text-xs mt-1"><strong>建檔時間:</strong> ${createdDate}</p>
+                            <p class="text-gray-500 text-xs mt-1"><strong>最後修改:</strong> ${updatedDate}</p>
+                            <div class="col-span-1 md:col-span-2">
+                                <strong>備註:</strong> ${s.note || '無'}
+                            </div>
+                        </div>
+                        <div class="flex gap-2 justify-end">
+                             <button onclick="openAddProductModal('${s.id}')" class="px-3 py-1.5 bg-green-600 text-white rounded hover:bg-green-700 text-sm font-bold flex items-center gap-1">
+                                + 新增產品
+                            </button>
+                            <button onclick="openEditSupplier('${s.id}')" class="px-3 py-1.5 bg-blue-100 text-blue-700 rounded hover:bg-blue-200 text-sm font-medium">修改</button>
+                            <button onclick="deleteSupplier('${s.id}')" class="px-3 py-1.5 bg-red-100 text-red-500 rounded hover:bg-red-200 text-sm font-medium">刪除</button>
+                        </div>
+                    </div>
+                `;
+
+                fragment.appendChild(item);
+            }, '<div class="text-center text-gray-400 py-8">沒有符合搜尋條件的供應商</div>');
+        }
+function toggleSupplierDetails(id) {
+            const details = document.getElementById(`details-${id}`);
+            const icon = document.getElementById(`icon-${id}`);
+            if (details.classList.contains('hidden')) {
+                details.classList.remove('hidden');
+                icon.classList.add('rotate-180');
+            } else {
+                details.classList.add('hidden');
+                icon.classList.remove('rotate-180');
+            }
+        }
+
+        function renderProducts() {
+            const keyword = getInputValue('searchProduct').toLowerCase();
+            const supplierMap = new Map((data.suppliers || []).map(s => [s.id, s.name]));
+
+            const filtered = filterSafe(data.products, p => {
+                const supplierName = supplierMap.get(p.supplierId) || '';
+                return (p.prodName || '').toLowerCase().includes(keyword) || 
+                       ((p.spec || '').toLowerCase().includes(keyword)) ||
+                       supplierName.toLowerCase().includes(keyword);
+            });
+
+            renderList('productList', filtered, (fragment, p) => {
+                const supplierName = supplierMap.get(p.supplierId) || '';
+                const urlLink = p.prodUrl ? `<a href="${p.prodUrl}" target="_blank" class="text-blue-500 hover:text-blue-700 ml-1 inline-block align-middle" title="開啟產品網頁"><svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg></a>` : '';
+                const tr = document.createElement('tr');
+                tr.className = 'border-b hover:bg-gray-50 group';
+                tr.innerHTML = `
+                    <td class="p-4 align-top">
+                        <div class="font-bold text-gray-800 flex items-center">${p.prodName}${urlLink}</div>
+                        <div class="text-xs text-gray-500">${p.spec || '無規格'}</div>
+                        <div class="text-xs text-gray-400 mt-1">${p.prodNote || ''}</div>
+                    </td>
+                    <td class="p-4 align-top text-sm">
+                        <div class="font-medium">${supplierName ? supplierName : '<span class="text-red-400">未知供應商</span>'}</div>
+                    </td>
+                    <td class="p-4 align-top text-sm">
+                        <span class="bg-blue-100 text-blue-800 px-2 py-0.5 rounded text-xs font-bold">${p.deliveryTime || '未定'}</span>
+                    </td>
+                    <td class="p-4 align-top font-mono text-blue-600 font-bold">$${p.price}</td>
+                    <td class="p-4 align-top text-sm">${p.isTaxIncl}</td>
+                    <td class="p-4 align-top text-sm text-gray-500">$${p.shipping || 0}</td>
+                    <td class="p-4 align-top">
+                        <div class="flex flex-col gap-2">
+                            <button onclick="addToCart('${p.id}')" class="px-3 py-1 bg-blue-600 text-white rounded hover:bg-blue-700 transition text-sm shadow-sm">加入採購</button>
+                            <div class="flex gap-2 text-xs">
+                                <button onclick="openEditProduct('${p.id}')" class="text-orange-500 hover:underline">修改</button>
+                                <button onclick="deleteProduct('${p.id}')" class="text-red-500 hover:underline">刪除</button>
+                            </div>
+                        </div>
+                    </td>
+                `;
+                fragment.appendChild(tr);
+            }, '<tr><td colspan="7" class="p-8 text-center text-gray-400">沒有符合搜尋條件的產品</td></tr>');
+        }
+
+        // ================= 購物車與訂單邏輯 (v10.0 核心修改) =================
+
+        function addToCart(productId) {
+            const product = data.products.find(p => p.id === productId);
+            if (!product) return;
+            
+            if (!data.cart) data.cart = [];
+            
+            const existing = data.cart.find(item => item.productId === productId);
+            if (existing) {
+                existing.quantity += 1;
+            } else {
+                data.cart.push({
+                    productId: productId,
+                    quantity: 1,
+                    customPrice: product.price, 
+                    customShipping: product.shipping,
+                    customNote: '',
+                    taxStatus: product.isTaxIncl || '含稅' 
+                });
+            }
+            saveData();
+            updateCartCount();
+            showToast('已加入採購單', 'bg-blue-500');
+        }
+
+        function updateCartCount() {
+            const badge = document.getElementById('cartCount');
+            const count = data.cart?.length || 0;
+            badge.textContent = count;
+            badge.classList.toggle('hidden', count === 0);
+        }
+
+        function renderCart() {
+            const container = document.getElementById('cartList');
+            container.innerHTML = '';
+            
+            selectedCartItems = new Set([...selectedCartItems].filter(pid => data.cart.some(item => item.productId === pid)));
+
+            if (!data.cart || data.cart.length === 0) {
+                container.innerHTML = '<tr><td colspan="9" class="p-8 text-center text-gray-400">清單目前為空</td></tr>';
+                recalcCartSummary();
+                return;
+            }
+
+            data.cart.forEach((item, index) => {
+                const p = data.products.find(prod => prod.id === item.productId);
+                if (!p) { return; }
+                const supplier = data.suppliers.find(s => s.id === p.supplierId);
+                
+                const unitPrice = item.customPrice !== undefined ? item.customPrice : p.price;
+                const shipFee = item.customShipping !== undefined ? item.customShipping : p.shipping;
+                const qty = item.quantity || 1;
+                const taxStatus = item.taxStatus || '含稅'; 
+
+                // 單行小計顯示 (僅供參考)
+                // v11.3 預覽邏輯：若為「不含稅」，運費與產品總和後再加5%
+                let rowBase = (unitPrice * qty) + shipFee;
+                let rowTotal = rowBase;
+                if (taxStatus === '不含稅') rowTotal = rowBase * 1.05;
+
+                const tr = document.createElement('tr');
+                tr.className = 'hover:bg-blue-50 transition-colors';
+                const isChecked = selectedCartItems.has(item.productId) ? 'checked' : '';
+
+                tr.innerHTML = `
+                    <td class="p-3 text-center">
+                        <input type="checkbox" class="cart-checkbox w-4 h-4" value="${item.productId}" ${isChecked} onchange="toggleCartItemSelection(this)">
+                    </td>
+                    <td class="p-3">
+                        <div class="font-bold text-gray-800">${p.prodName}</div>
+                        <div class="text-xs text-gray-500">${supplier?.name || '未知'}</div>
+                        <div class="text-xs bg-gray-200 inline-block px-1 rounded mt-1">交期: ${p.deliveryTime || '未定'}</div>
+                        ${p.spec ? `<div class="text-xs text-gray-600 bg-blue-50 inline-block px-2 py-1 rounded mt-1 ml-1"><strong>規格:</strong> ${p.spec}</div>` : ''}
+                    </td>
+                    <td class="p-3">
+                        <div class="flex items-center">
+                            <span class="text-gray-400 mr-1">$</span>
+                            <input type="number" step="0.01" value="${unitPrice}" 
+                                class="w-24 p-1 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 text-right font-mono"
+                                onchange="updateCartItem(${index}, 'price', this.value)">
+                        </div>
+                        <div class="text-xs text-gray-400 mt-1">原價: $${p.price}</div>
+                    </td>
+                    <td class="p-3">
+                        <input type="number" value="${qty}" min="1" 
+                            class="w-16 p-1 border border-gray-300 rounded text-center"
+                            onchange="updateCartItem(${index}, 'qty', this.value)">
+                    </td>
+                    <td class="p-3">
+                        <select class="p-1 border border-gray-300 rounded text-xs w-full" 
+                                onchange="updateCartItem(${index}, 'taxStatus', this.value)">
+                            <option value="含稅" ${taxStatus === '含稅' ? 'selected' : ''}>含稅</option>
+                            <option value="不含稅" ${taxStatus === '不含稅' ? 'selected' : ''}>未稅 (+5%)</option>
+                            <option value="不計稅" ${taxStatus === '不計稅' ? 'selected' : ''}>不計稅 (收據)</option>
+                        </select>
+                    </td>
+                    <td class="p-3">
+                         <div class="flex items-center">
+                            <span class="text-gray-400 mr-1">$</span>
+                            <input type="number" step="0.01" value="${shipFee}" 
+                                class="w-20 p-1 border border-gray-300 rounded text-right"
+                                onchange="updateCartItem(${index}, 'shipping', this.value)">
+                        </div>
+                    </td>
+                    <td class="p-3">
+                        <input type="text" value="${item.customNote || ''}" placeholder="填寫備註..."
+                            class="w-full p-1 border border-gray-300 rounded text-sm"
+                            onchange="updateCartItem(${index}, 'note', this.value)">
+                    </td>
+                    <td class="p-3 font-mono text-blue-700 font-bold text-right">
+                        $${Math.round(rowTotal).toLocaleString()}
+                        ${taxStatus === '不含稅' ? '<div class="text-[10px] text-red-500">(含稅額)</div>' : ''}
+                        ${taxStatus === '不計稅' ? '<div class="text-[10px] text-gray-400">(無稅額)</div>' : ''}
+                    </td>
+                    <td class="p-3 text-center">
+                        <div class="flex flex-col gap-2 items-center">
+                            <button onclick="confirmOrder(${index})" class="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded hover:bg-blue-200 w-full font-bold">單獨下單</button>
+                            <button onclick="removeFromCart(${index})" class="text-red-400 hover:text-red-600 hover:bg-red-50 p-1 rounded transition text-xs flex items-center">
+                                <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                </svg> 移除
+                            </button>
+                        </div>
+                    </td>
+                `;
+                container.appendChild(tr);
+            });
+
+            recalcCartSummary();
+            updateCartCount();
+        }
+
+        // v11.3 更新: 採購清單稅務計算邏輯同步更新
+        function recalcCartSummary() {
+            let totalNet = 0; // 暫不嚴格區分，但總額需正確
+            let totalTax = 0;
+            let grandTotal = 0;
+            let shippingTotal = 0;
+
+            selectedCartItems.forEach(productId => {
+                const item = data.cart.find(cartItem => cartItem.productId === productId);
+                if (!item) return;
+
+                const price = parseFloat(item.customPrice) || 0;
+                const qty = parseInt(item.quantity) || 1;
+                const shipping = parseFloat(item.customShipping) || 0;
+                const taxStatus = item.taxStatus || '含稅';
+
+                const itemSubtotal = price * qty;
+                const itemAndShip = itemSubtotal + shipping;
+                
+                shippingTotal += shipping;
+
+                let itemTax = 0;
+                if (taxStatus === '不含稅') {
+                    // 外加稅 (產品+運費)*5%
+                    itemTax = itemAndShip * 0.05;
+                    totalTax += itemTax;
+                    grandTotal += (itemAndShip + itemTax);
+                } else if (taxStatus === '含稅') {
+                    // 內含稅
+                    itemTax = itemAndShip - (itemAndShip / 1.05);
+                    totalTax += itemTax;
+                    grandTotal += itemAndShip;
+                } else {
+                    // 不計稅
+                    grandTotal += itemAndShip;
+                }
+            });
+
+            // 這裡的 Subtotal 顯示已勾選品項基本金額 (淨額)
+            document.getElementById('selectedCount').textContent = selectedCartItems.size;
+
+            // 計算小計（扣掉外加稅）
+            let subtotal = 0;
+            selectedCartItems.forEach(productId => {
+                const item = data.cart.find(cartItem => cartItem.productId === productId);
+                if (!item) return;
+                const price = parseFloat(item.customPrice) || 0;
+                const qty = parseInt(item.quantity) || 1;
+                const shipping = parseFloat(item.customShipping) || 0;
+                const taxStatus = item.taxStatus || '含稅';
+
+                const itemBase = price * qty + shipping;
+                if (taxStatus === '含稅') {
+                    subtotal += itemBase / 1.05;
+                } else {
+                    subtotal += itemBase;
+                }
+            });
+
+            document.getElementById('cartSubtotal').textContent = Math.round(subtotal).toLocaleString();
+            document.getElementById('cartTax').textContent = Math.round(totalTax).toLocaleString();
+            document.getElementById('cartShipping').textContent = Math.round(shippingTotal).toLocaleString();
+            document.getElementById('cartTotal').textContent = Math.round(grandTotal).toLocaleString();
+        }
+
+        function toggleSelectAllCart(source) {
+            const checkboxes = document.querySelectorAll('.cart-checkbox');
+            checkboxes.forEach(cb => {
+                cb.checked = source.checked;
+                toggleCartItemSelection(cb, false); // false = 不要每次都重繪，最後再一次
+            });
+            recalcCartSummary();
+        }
+
+        function toggleCartItemSelection(checkbox, triggerRecalc = true) {
+            const productId = checkbox.value;
+            if (checkbox.checked) {
+                selectedCartItems.add(productId);
+            } else {
+                selectedCartItems.delete(productId);
+            }
+            if (triggerRecalc) recalcCartSummary();
+        }
+
+        function updateCartItem(index, type, value) {
+            if (type === 'price') {
+                data.cart[index].customPrice = parseFloat(value) || 0;
+            } else if (type === 'qty') {
+                data.cart[index].quantity = parseInt(value) || 1;
+            } else if (type === 'shipping') {
+                data.cart[index].customShipping = parseFloat(value) || 0;
+            } else if (type === 'note') {
+                data.cart[index].customNote = value;
+            } else if (type === 'taxStatus') {
+                data.cart[index].taxStatus = value; 
+            }
+            saveData();
+            renderCart(); 
+        }
+
+        function removeFromCart(index) {
+            data.cart.splice(index, 1);
+            selectedCartItems.clear();
+            document.getElementById('selectAllCart').checked = false;
+            saveData();
+            renderCart();
+        }
+
+        function clearCart() {
+            if (confirm('確定要清空採購清單嗎？')) {
+                data.cart = [];
+                selectedCartItems.clear();
+                saveData();
+                renderCart();
+            }
+        }
+
+        function confirmOrder(specificIndex = null) {
+            let itemsToOrder = [];
+            let indicesToRemove = [];
+
+            if (specificIndex !== null) {
+                if (!confirm('確定要針對此單一品項建立訂單嗎？')) return;
+                itemsToOrder.push(data.cart[specificIndex]);
+                indicesToRemove.push(specificIndex);
+            } else {
+                if (selectedCartItems.size === 0) {
+                    return showToast('請先勾選要下單的項目，或使用「單獨下單」按鈕', 'bg-red-500');
+                }
+                
+                if (!confirm(`確定要將已選取的 ${selectedCartItems.size} 筆項目建立為正式訂單嗎？`)) return;
+
+                const selectedProductIds = Array.from(selectedCartItems);
+                selectedProductIds.forEach(productId => {
+                    const idx = data.cart.findIndex(item => item.productId === productId);
+                    if (idx !== -1) {
+                        itemsToOrder.push(data.cart[idx]);
+                        indicesToRemove.push(idx);
+                    }
+                });
+            }
+
+            // v11.1: 初始化訂單 status 改為 'ordered' (原 pending)
+            // v11.3: 新增 paymentDate
+            const newOrder = {
+                id: 'ord_' + Date.now(),
+                createdAt: new Date().toISOString(),
+                date: new Date().toISOString().split('T')[0],
+                status: 'ordered', // v11.1 default
+                paymentStatus: 'unpaid', 
+                paymentDate: '', // v11.3 新增
+                invoiceNumber: '',
+                supplierInvoiceDate: '',
+                originalOrderNo: '',
+                quotationNo: '', // v11.0 新增
+                logisticsProvider: '',
+                trackingNumber: '',
+                shipDate: '',
+                arrivalDate: '',
+                orderNote: '',
+                discount: 0,
+                items: JSON.parse(JSON.stringify(itemsToOrder))
+            };
+
+            if (!data.orders) data.orders = [];
+            data.orders.unshift(newOrder);
+
+            indicesToRemove.sort((a, b) => b - a);
+            indicesToRemove.forEach(idx => {
+                data.cart.splice(idx, 1);
+            });
+            
+            selectedCartItems.clear();
+            document.getElementById('selectAllCart').checked = false;
+
+            saveData();
+            // 確保 UI 的購物車計數與小計會被即時更新
+            updateCartCount();
+            recalcCartSummary();
+            renderCart();
+            switchTab('orders');
+            showToast('訂單建立成功！', 'bg-green-600');
+        }
+
+        // ================= 計算預計到貨日 =================
+        function calculateEstimatedArrival(orderDateStr, items) {
+            if (!orderDateStr || !items || items.length === 0) return "未定";
+
+            let maxDays = 0;
+            let hasParsableData = false;
+
+            items.forEach(item => {
+                const p = data.products.find(prod => prod.id === item.productId);
+                if (p && p.deliveryTime) {
+                    const match = p.deliveryTime.match(/(\d+)\s*(天|日|day|週|周|week)/i);
+                    if (match) {
+                        let val = parseInt(match[1]);
+                        const unit = match[2].toLowerCase();
+                        if (unit.includes('週') || unit.includes('周') || unit.includes('week')) {
+                            val *= 7;
+                        }
+                        if (val > maxDays) maxDays = val;
+                        hasParsableData = true;
+                    }
+                }
+            });
+
+            if (!hasParsableData && maxDays === 0) return "--";
+
+            const orderDate = new Date(orderDateStr);
+            orderDate.setDate(orderDate.getDate() + maxDays);
+            
+            return orderDate.toISOString().split('T')[0];
+        }
+
+        function calculateMonthlyDueDate(orderDateStr, monthlyDays){
+            if(!orderDateStr || !monthlyDays) return "";
+            const orderDate = new Date(orderDateStr);
+            const lastDay = new Date(orderDate.getFullYear(), orderDate.getMonth()+1, 0);
+            lastDay.setDate(lastDay.getDate() + parseInt(monthlyDays));
+            return lastDay.toISOString().split("T")[0];
+        }
+
+        // ================= 訂單渲染邏輯 (v11.3 升級: 稅務計算修正 + 付款日) =================
+        function renderOrders() {
+            const container = document.getElementById('orderList');
+            if (!container) return;
+            container.innerHTML = '';
+
+            const keyword = (document.getElementById('searchOrderKeyword')?.value || '').toLowerCase();
+            const statusFilter = document.getElementById('filterOrderStatus')?.value || 'all';
+            const paymentFilter = document.getElementById('filterPaymentStatus')?.value || 'all';
+
+            if (!data.orders || data.orders.length === 0) {
+                container.innerHTML = '<div class="text-center text-gray-500 py-10 bg-white rounded">目前沒有歷史訂單。</div>';
+                return;
+            }
+
+            const filteredOrders = data.orders.filter(order => {
+                // v11.1 兼容舊資料: 將舊 pending 對應到 ordered
+                let currentStatus = order.status;
+                if(currentStatus === 'pending') currentStatus = 'ordered';
+
+                if (statusFilter !== 'all' && currentStatus !== statusFilter) return false;
+                
+                // 付款狀態篩選邏輯
+                const payStatus = order.paymentStatus || 'unpaid';
+                if (paymentFilter !== 'all' && payStatus !== paymentFilter) return false;
+
+                if (keyword) {
+                    const idMatch = order.id.toLowerCase().includes(keyword);
+                    const invoiceMatch = (order.invoiceNumber || '').toLowerCase().includes(keyword);
+                    const originalOrderMatch = (order.originalOrderNo || '').toLowerCase().includes(keyword);
+                    // v11.0: 增加搜尋報價單號
+                    const quoteMatch = (order.quotationNo || '').toLowerCase().includes(keyword);
+                    
+                    const itemsMatch = order.items.some(item => {
+                        const p = data.products.find(prod => prod.id === item.productId);
+                        const prodName = p ? p.prodName.toLowerCase() : '';
+                        const supplier = p ? (data.suppliers.find(s => s.id === p.supplierId)?.name || '') : '';
+                        return prodName.includes(keyword) || supplier.toLowerCase().includes(keyword);
+                    });
+                    return idMatch || invoiceMatch || originalOrderMatch || quoteMatch || itemsMatch;
+                }
+                return true;
+            });
+
+            if (filteredOrders.length === 0) {
+                container.innerHTML = '<div class="text-center text-gray-500 py-10 bg-white rounded">沒有符合篩選條件的訂單。</div>';
+                return;
+            }
+
+            filteredOrders.forEach(order => {
+                // 資料補全
+                order.paymentStatus = order.paymentStatus || 'unpaid';
+                if(order.status === 'pending') order.status = 'ordered'; // Migration on render
+
+                // v11.3: 稅務邏輯核心修正
+                let totalNetSales = 0; // 未稅銷售額 (含運費)
+                let totalTaxAmount = 0; // 總稅額
+                let totalPayable = 0;   // 應付總額
+
+                order.items.forEach(item => {
+                    const price = item.customPrice || 0;
+                    const qty = item.quantity || 1;
+                    const shipping = item.customShipping || 0;
+                    const taxStatus = item.taxStatus || '含稅'; 
+                    
+                    // 基礎金額：產品總價 + 運費
+                    const itemBase = (price * qty) + shipping;
+                    
+                    if (taxStatus === '含稅') {
+                        // 內含：倒扣計算
+                        // 總金額 = itemBase
+                        // 未稅 = itemBase / 1.05
+                        // 稅額 = itemBase - 未稅
+                        const net = itemBase / 1.05;
+                        const tax = itemBase - net;
+                        
+                        totalNetSales += net;
+                        totalTaxAmount += tax;
+                        totalPayable += itemBase;
+
+                    } else if (taxStatus === '不含稅') {
+                        // 外加：直接乘 5%
+                        // 未稅 = itemBase
+                        // 稅額 = itemBase * 0.05
+                        // 總金額 = itemBase + 稅額
+                        const tax = itemBase * 0.05;
+                        
+                        totalNetSales += itemBase;
+                        totalTaxAmount += tax;
+                        totalPayable += (itemBase + tax);
+
+                    } else {
+                        // 不計稅
+                        totalNetSales += itemBase;
+                        // 稅額 0
+                        totalPayable += itemBase;
+                    }
+                });
+
+                const discount = parseFloat(order.discount) || 0;
+                totalPayable -= discount; 
+                // 若有折扣，通常折扣是扣在總額，這裡簡單處理，未稅額顯示可能會稍微不準確(若未等比扣除)，但應付總額是準確的
+
+                const createdDateDisplay = order.createdAt 
+                    ? new Date(order.createdAt).toLocaleString('zh-TW', { hour12: false }) 
+                    : `${order.date} (歷史單)`;
+                const estimatedDate = calculateEstimatedArrival(order.date, order.items);
+                const todayStr = new Date().toISOString().split('T')[0];
+                const isOverdue = estimatedDate !== "--" && estimatedDate < todayStr && order.status !== 'completed' && order.status !== 'cancelled' && order.status !== 'arrived';
+                const estimatedDateClass = isOverdue ? 'text-red-600 font-bold' : 'text-gray-400 font-normal';
+
+                // v11.1: 物流狀態 Badge 與 顏色
+                let statusBadge = '';
+                let statusColor = '';
+                let borderColor = 'border-l-4 border-gray-400';
+
+                switch(order.status) {
+                    case 'ordered': 
+                        statusBadge = '已下單'; 
+                        statusColor = 'bg-gray-100 text-gray-800 border-gray-300'; 
+                        borderColor = 'border-l-4 border-gray-400';
+                        break;
+                    case 'partial_shipped': 
+                        statusBadge = '部分出貨'; 
+                        statusColor = 'bg-orange-100 text-orange-800 border-orange-200'; 
+                        borderColor = 'border-l-4 border-orange-400';
+                        break;
+                    case 'shipped': 
+                        statusBadge = '全部出貨'; 
+                        statusColor = 'bg-blue-100 text-blue-800 border-blue-200'; 
+                        borderColor = 'border-l-4 border-blue-400';
+                        break;
+                    case 'arrived': 
+                        statusBadge = '已收貨'; 
+                        statusColor = 'bg-indigo-100 text-indigo-800 border-indigo-200'; 
+                        borderColor = 'border-l-4 border-indigo-400';
+                        break;
+                    case 'completed': 
+                        statusBadge = '已驗收完成'; 
+                        statusColor = 'bg-green-100 text-green-800 border-green-200'; 
+                        borderColor = 'border-l-4 border-green-500 opacity-75';
+                        break;
+                    case 'cancelled': 
+                        statusBadge = '已取消(退)'; 
+                        statusColor = 'bg-red-100 text-red-800 border-red-200 line-through'; 
+                        borderColor = 'border-l-4 border-red-500 opacity-60';
+                        break;
+                    default: 
+                        statusBadge = '未知狀態'; 
+                        statusColor = 'bg-gray-100';
+                }
+
+                // 付款狀態樣式
+                let payClass = '';
+                if(order.paymentStatus === 'paid') payClass = 'bg-green-50 border-green-300 text-green-700';
+                else if(order.paymentStatus === 'monthly') payClass = 'bg-purple-50 border-purple-300 text-purple-700';
+                else payClass = 'bg-red-50 border-red-300 text-red-700';
+
+                // v11.0: 訂單項目改為可編輯輸入框
+                let itemsHtml = '';
+                order.items.forEach((item, idx) => {
+                    const p = data.products.find(prod => prod.id === item.productId);
+                    const prodName = p ? p.prodName : '(已刪除產品)';
+                    const deliveryTime = p ? p.deliveryTime : '未知';
+                    const supplierName = p ? (data.suppliers.find(s=>s.id === p.supplierId)?.name) : '';
+                    const taxStatus = item.taxStatus || '含稅';
+
+                    // 計算該行的小計顯示 (僅供參考)
+                    let lineBase = (item.customPrice * item.quantity) + item.customShipping;
+                    let lineTotal = lineBase;
+                    if (taxStatus === '不含稅') lineTotal = lineBase * 1.05;
+
+                    itemsHtml += `
+                        <div class="flex flex-col md:flex-row gap-2 items-start md:items-center py-2 border-b last:border-0 border-gray-100 bg-gray-50/50 p-2 rounded mb-1">
+                            <div class="flex-1">
+                                <div class="font-bold text-gray-700">${prodName}</div>
+                                <div class="text-xs text-gray-400">
+                                    ${supplierName} | 交期: ${deliveryTime}
+                                </div>
+                                ${p?.spec ? `<div class="text-xs text-gray-600 bg-blue-50 inline-block px-2 py-1 rounded mt-1"><strong>規格:</strong> ${p.spec}</div>` : ''}
+                                <div class="flex gap-2 mt-1">
+                                    <input type="text" value="${item.customNote || ''}" placeholder="備註..." 
+                                        class="text-xs p-1 border rounded w-full md:w-48 bg-white"
+                                        onchange="updateOrderItem('${order.id}', ${idx}, 'customNote', this.value)">
+                                </div>
+                            </div>
+                            <div class="flex flex-wrap gap-2 items-center">
+                                <div class="flex flex-col">
+                                    <span class="text-[10px] text-gray-500">單價</span>
+                                    <input type="number" step="0.01" value="${item.customPrice}" 
+                                        class="w-20 p-1 text-sm border rounded text-right"
+                                        onchange="updateOrderItem('${order.id}', ${idx}, 'customPrice', this.value)">
+                                </div>
+                                <div class="flex flex-col">
+                                    <span class="text-[10px] text-gray-500">數量</span>
+                                    <input type="number" min="1" value="${item.quantity}" 
+                                        class="w-16 p-1 text-sm border rounded text-center"
+                                        onchange="updateOrderItem('${order.id}', ${idx}, 'quantity', this.value)">
+                                </div>
+                                <div class="flex flex-col">
+                                    <span class="text-[10px] text-gray-500">稅別</span>
+                                    <select class="p-1 text-xs border rounded w-20"
+                                            onchange="updateOrderItem('${order.id}', ${idx}, 'taxStatus', this.value)">
+                                        <option value="含稅" ${taxStatus==='含稅'?'selected':''}>含稅</option>
+                                        <option value="不含稅" ${taxStatus==='不含稅'?'selected':''}>未稅</option>
+                                        <option value="不計稅" ${taxStatus==='不計稅'?'selected':''}>不計稅</option>
+                                    </select>
+                                </div>
+                                <div class="flex flex-col">
+                                    <span class="text-[10px] text-gray-500">運費</span>
+                                    <input type="number" min="0" value="${item.customShipping}" 
+                                        class="w-16 p-1 text-sm border rounded text-right"
+                                        onchange="updateOrderItem('${order.id}', ${idx}, 'customShipping', this.value)">
+                                </div>
+                            </div>
+                            <div class="text-right min-w-[80px]">
+                                <div class="font-mono text-sm font-bold text-blue-700">$${Math.round(lineTotal).toLocaleString()}</div>
+                                ${taxStatus==='不含稅' ? '<span class="text-[10px] text-red-500">(含稅)</span>' : ''}
+                            </div>
+                            <button onclick="deleteOrderItem('${order.id}', ${idx})" class="text-gray-400 hover:text-red-600 hover:bg-red-50 p-1 rounded" title="刪除此項目${lineTotal === 0 ? ' (金額為0)' : ''}">
+                                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                                    <path fill-rule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clip-rule="evenodd" />
+                                </svg>
+                            </button>
+                        </div>
+                    `;
+                });
+
+                const div = document.createElement('div');
+                div.className = `card p-5 ${borderColor}`;
+                
+                div.innerHTML = `
+                    <div class="flex flex-col md:flex-row justify-between md:items-center mb-2 pb-3 border-b border-gray-100">
+                        <div class="mb-2 md:mb-0">
+                            <div class="flex flex-col gap-1">
+                                <div class="text-xs text-gray-400 font-mono">
+                                    訂單編號: ${order.id} | 建檔時間: ${createdDateDisplay}
+                                </div>
+                                <div class="flex items-center gap-2 mt-1">
+                                    <label class="text-sm font-bold text-gray-700">下單日:</label>
+                                    <input type="date" value="${order.date}" 
+                                        class="text-sm border rounded px-2 py-0.5 focus:ring-2 focus:ring-blue-500 bg-white"
+                                        onchange="updateOrderMeta('${order.id}', 'date', this.value)">
+                                </div>
+                            </div>
+                        </div>
+                        <div class="flex flex-wrap items-center gap-3 justify-end mt-2 md:mt-0">
+                            <!-- v10.0: 付款狀態選單 -->
+                            <div class="flex items-center gap-1">
+                                <span class="text-xs font-bold text-gray-500">付款:</span>
+                                <select onchange="updateOrderMeta('${order.id}', 'paymentStatus', this.value)" 
+                                        class="text-sm border rounded p-1 font-bold cursor-pointer outline-none ${payClass}">
+                                    <option value="unpaid" ${order.paymentStatus === 'unpaid'?'selected':''}>未付款</option>
+                                    <option value="paid" ${order.paymentStatus === 'paid'?'selected':''}>已付款</option>
+                                    <option value="monthly" ${order.paymentStatus === 'monthly'?'selected':''}>月結</option>
+                                </select>
+                                <!-- v11.3 新增付款日 -->
+                                <input type="date" title="付款日期" value="${order.paymentDate || ''}" 
+                                    class="text-sm border rounded p-1 w-32" 
+                                    onchange="updateOrderMeta('${order.id}', 'paymentDate', this.value)">
+                            </div>
+
+                            <span class="px-3 py-1 rounded-full text-sm font-bold border ${statusColor}">${statusBadge}</span>
+                            
+                            <!-- v11.1 升級後的狀態選單 -->
+                            <select onchange="updateOrderStatus('${order.id}', this.value)" class="text-sm border rounded p-1 bg-white">
+                                <option value="ordered" ${order.status === 'ordered'?'selected':''}>變更: 已下單</option>
+                                <option value="partial_shipped" ${order.status === 'partial_shipped'?'selected':''}>變更: 部分出貨</option>
+                                <option value="shipped" ${order.status === 'shipped'?'selected':''}>變更: 全部出貨</option>
+                                <option value="arrived" ${order.status === 'arrived'?'selected':''}>變更: 已收貨</option>
+                                <option value="completed" ${order.status === 'completed'?'selected':''}>變更: 已驗收完成</option>
+                                <option value="cancelled" ${order.status === 'cancelled'?'selected':''}>變更: 已取消(退)</option>
+                            </select>
+
+                            <button onclick="deleteOrder('${order.id}')" class="text-gray-400 hover:text-red-500 ml-2">
+                                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                                    <path fill-rule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clip-rule="evenodd" />
+                                </svg>
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- 訂單資訊編輯區塊 -->
+                    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3 mb-4 bg-gray-50 p-3 rounded">
+                        <div>
+                             <label class="block text-xs font-bold text-gray-500 mb-1">原始訂單編號</label>
+                             <input type="text" value="${order.originalOrderNo || ''}" placeholder="輸入原始單號..."
+                                class="w-full border border-gray-300 rounded px-2 py-1 text-sm focus:bg-white"
+                                onchange="updateOrderMeta('${order.id}', 'originalOrderNo', this.value)">
+                        </div>
+                        <!-- v11.0 新增: 報價單號 -->
+                        <div>
+                             <label class="block text-xs font-bold text-gray-500 mb-1">報價單號</label>
+                             <input type="text" value="${order.quotationNo || ''}" placeholder="輸入報價單號..."
+                                class="w-full border border-gray-300 rounded px-2 py-1 text-sm focus:bg-white"
+                                onchange="updateOrderMeta('${order.id}', 'quotationNo', this.value)">
+                        </div>
+                        <div>
+                             <label class="block text-xs font-bold text-gray-500 mb-1">供應商發票號碼</label>
+                             <input type="text" value="${order.invoiceNumber || ''}" placeholder="輸入發票號..."
+                                class="w-full border border-gray-300 rounded px-2 py-1 text-sm focus:bg-white"
+                                onchange="updateOrderMeta('${order.id}', 'invoiceNumber', this.value)">
+                        </div>
+                        <div>
+                             <label class="block text-xs font-bold text-gray-500 mb-1">發票日期</label>
+                             <input type="date" value="${order.supplierInvoiceDate || ''}"
+                                class="w-full border border-gray-300 rounded px-2 py-1 text-sm focus:bg-white"
+                                onchange="updateOrderMeta('${order.id}', 'supplierInvoiceDate', this.value)">
+                        </div>
+                        <div>
+                             <label class="block text-xs font-bold text-gray-500 mb-1">物流商</label>
+                             <input type="text" value="${order.logisticsProvider || ''}" placeholder="例如: 黑貓/順豐"
+                                class="w-full border border-gray-300 rounded px-2 py-1 text-sm focus:bg-white"
+                                onchange="updateOrderMeta('${order.id}', 'logisticsProvider', this.value)">
+                        </div>
+                         <div>
+                             <label class="block text-xs font-bold text-gray-500 mb-1">物流單號</label>
+                             <input type="text" value="${order.trackingNumber || ''}" placeholder="輸入追蹤碼..."
+                                class="w-full border border-gray-300 rounded px-2 py-1 text-sm focus:bg-white"
+                                onchange="updateOrderMeta('${order.id}', 'trackingNumber', this.value)">
+                        </div>
+                        <div>
+                             <label class="block text-xs font-bold text-gray-500 mb-1">出貨日</label>
+                             <input type="date" value="${order.shipDate || ''}"
+                                class="w-full border border-gray-300 rounded px-2 py-1 text-sm focus:bg-white"
+                                onchange="updateOrderMeta('${order.id}', 'shipDate', this.value)">
+                        </div>
+                        <div>
+                             <label class="block text-xs font-bold text-gray-500 mb-1">
+                                到貨日 <span class="${estimatedDateClass} text-[10px] ml-1" title="根據交期自動推算">(系統預估: ${estimatedDate})</span>
+                             </label>
+                             <input type="date" value="${order.arrivalDate || ''}"
+                                class="w-full border border-gray-300 rounded px-2 py-1 text-sm focus:bg-white"
+                                onchange="updateOrderMeta('${order.id}', 'arrivalDate', this.value)">
+                        </div>
+                        <div>
+                             <label class="block text-xs font-bold text-gray-500 mb-1">訂單備註 (溝通紀錄)</label>
+                             <input type="text" value="${order.orderNote || ''}" placeholder="紀錄廠商溝通細節..."
+                                class="w-full border border-gray-300 rounded px-2 py-1 text-sm focus:bg-white"
+                                onchange="updateOrderMeta('${order.id}', 'orderNote', this.value)">
+                        </div>
+                        <div>
+                             <label class="block text-xs font-bold text-gray-500 mb-1">訂單折扣 (折抵總額)</label>
+                             <input type="number" value="${order.discount || 0}" placeholder="0"
+                                class="w-full border border-gray-300 rounded px-2 py-1 text-sm focus:bg-white text-red-600 font-bold"
+                                onchange="updateOrderMeta('${order.id}', 'discount', this.value)">
+                        </div>
+                    </div>
+
+                    <div class="px-2 mb-3">
+                        <div class="text-xs font-bold text-gray-500 mb-2">訂單明細 (修改數值後自動更新金額)</div>
+                        ${itemsHtml}
+                    </div>
+                    
+                    <div class="flex justify-end items-center pt-2 border-t text-sm">
+                        <div class="text-right space-y-1">
+                            <div class="text-gray-500 flex justify-end gap-4">
+                                <span>銷售額(未稅+運費): $${Math.round(totalNetSales).toLocaleString()}</span>
+                                <span>稅額 (5%): $${Math.round(totalTaxAmount).toLocaleString()}</span>
+                            </div>
+                            ${discount > 0 ? `<div class="text-red-500">折扣: -$${Math.round(discount).toLocaleString()}</div>` : ''}
+                            <div class="text-xl font-bold text-blue-800 border-t pt-1 mt-1">應付總額: $${Math.round(totalPayable).toLocaleString()}</div>
+                        </div>
+                    </div>
+                `;
+                container.appendChild(div);
+            });
+        }
+        
+        // v11.0: 訂單明細修改與金額變動警示
+        function updateOrderItem(orderId, itemIndex, field, value) {
+            const order = data.orders.find(o => o.id === orderId);
+            if (!order || !order.items[itemIndex]) return;
+
+            // 深拷貝一份訂單以計算新金額
+            const tempOrder = JSON.parse(JSON.stringify(order));
+            const item = tempOrder.items[itemIndex];
+
+            // 數值轉換
+            let newVal = value;
+            if (field === 'customPrice' || field === 'customShipping') newVal = parseFloat(value) || 0;
+            if (field === 'quantity') newVal = parseInt(value) || 1;
+            
+            // 更新暫存值
+            item[field] = newVal;
+
+            // 計算原總額
+            const oldTotal = calculateOrderTotal(order);
+            // 計算新總額
+            const newTotal = calculateOrderTotal(tempOrder);
+
+            // 如果金額有變動，跳出確認框
+            if (oldTotal !== newTotal) {
+                if (confirm(`修改此項目將導致訂單總金額由 $${Math.round(oldTotal)} 變更為 $${Math.round(newTotal)}。\n\n確定要更新嗎？`)) {
+                     // 使用者確認，寫入真實資料
+                     order.items[itemIndex][field] = newVal;
+                     saveData();
+                     renderOrders();
+                     showToast('訂單明細與金額已更新', 'bg-blue-600');
+                } else {
+                    // 使用者取消，重繪介面以還原數值
+                    renderOrders();
+                }
+            } else {
+                // 金額無變動 (例如只改備註)，直接存檔
+                order.items[itemIndex][field] = newVal;
+                saveData();
+                // 只有備註不一定要重繪整個列表，但為了保險起見還是重繪
+                if (field !== 'customNote') renderOrders(); 
+            }
+        }
+
+        // v11.3 更新 Helper: 符合新稅務邏輯
+        function calculateOrderTotal(order) {
+            let totalPayable = 0;
+            order.items.forEach(item => {
+                const price = item.customPrice || 0;
+                const qty = item.quantity || 1;
+                const shipping = item.customShipping || 0;
+                const taxStatus = item.taxStatus || '含稅'; 
+                
+                const itemBase = (price * qty) + shipping;
+                
+                if (taxStatus === '不含稅') {
+                    totalPayable += itemBase * 1.05;
+                } else {
+                    // 含稅 或 不計稅，itemBase 即為該項總額
+                    totalPayable += itemBase;
+                }
+            });
+            return totalPayable - (order.discount || 0);
+        }
+
+        function updateOrderStatus(orderId, status) {
+            const order = data.orders.find(o => o.id === orderId);
+            if (order) {
+                order.status = status;
+                saveData();
+                renderOrders();
+                showToast('訂單狀態已更新', 'bg-blue-500');
+            }
+        }
+
+        function updateOrderMeta(orderId, field, value) {
+            const order = data.orders.find(o => o.id === orderId);
+            if (order) {
+                if (field === 'discount') {
+                    const oldTotal = calculateOrderTotal(order);
+                    const tempOrder = JSON.parse(JSON.stringify(order));
+                    tempOrder.discount = parseFloat(value) || 0;
+                    const newTotal = calculateOrderTotal(tempOrder);
+
+                    if (confirm(`修改折扣將導致訂單總金額由 $${Math.round(oldTotal)} 變更為 $${Math.round(newTotal)}。\n確定要更新嗎？`)) {
+                         order[field] = parseFloat(value) || 0;
+                         saveData();
+                         renderOrders();
+                         return;
+                    } else {
+                        renderOrders();
+                        return;
+                    }
+                }
+                order[field] = value;
+                saveData();
+                if (field === 'date' || field === 'paymentStatus') { // 更新渲染
+                    renderOrders();
+                }
+            }
+        }
+
+        // v11.8: 新增訂單項目刪除功能 (金額為0的品項可刪除)
+        function deleteOrderItem(orderId, itemIndex) {
+            const order = data.orders.find(o => o.id === orderId);
+            if (!order || !order.items[itemIndex]) return;
+
+            const item = order.items[itemIndex];
+            const price = item.customPrice || 0;
+            const qty = item.quantity || 1;
+            const shipping = item.customShipping || 0;
+            const taxStatus = item.taxStatus || '含稅';
+            
+            // 計算該項目的金額
+            const itemBase = (price * qty) + shipping;
+            let itemTotal = itemBase;
+            if (taxStatus === '不含稅') {
+                itemTotal = itemBase * 1.05;
+            }
+
+            // 構建提示消息
+            let message = '';
+            const p = data.products.find(prod => prod.id === item.productId);
+            const prodName = p ? p.prodName : '(已刪除產品)';
+            
+            if (itemTotal === 0) {
+                message = `確定要刪除此品項嗎？\n\n產品: ${prodName}\n金額: $0 (金額為零)\n\n此操作無法復原。`;
+            } else {
+                message = `確定要刪除此品項嗎？\n\n產品: ${prodName}\n金額: $${Math.round(itemTotal).toLocaleString()}\n\n此操作無法復原。`;
+            }
+
+            if (confirm(message)) {
+                // 移除該項目
+                order.items.splice(itemIndex, 1);
+                
+                // 如果訂單已無項目，詢問是否刪除整個訂單
+                if (order.items.length === 0) {
+                    showToast('訂單明細已全部刪除，該訂單將自動移除', 'bg-orange-500');
+                    data.orders = data.orders.filter(o => o.id !== orderId);
+                } else {
+                    showToast(`已刪除品項: ${prodName}`, 'bg-green-600');
+                }
+                
+                saveData();
+                renderOrders();
+            }
+        }
+
+        function deleteOrder(orderId) {
+            if (confirm('確定要刪除這筆訂單記錄嗎？')) {
+                data.orders = data.orders.filter(o => o.id !== orderId);
+                saveData();
+                renderOrders();
+            }
+        }
+
+        // ================= Excel 操作邏輯 (v11.0 全面升級) =================
+
+        function saveAsExcel(dataArray, sheetName, fileName) {
+            const ws = XLSX.utils.aoa_to_sheet(dataArray);
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, ws, sheetName);
+            XLSX.writeFile(wb, fileName);
+        }
+        
+        function exportCartToExcel() {
+            if (!data.cart || data.cart.length === 0) return showToast('清單為空，無法匯出', 'bg-red-500');
+            
+            const exportData = [];
+            const headers = ["供應商", "產品名稱", "規格", "交期", "數量", "單價", "稅別", "運費", "備註", "小計(含稅)"];
+            exportData.push(headers);
+            
+            data.cart.forEach(item => {
+                const p = data.products.find(prod => prod.id === item.productId);
+                if (!p) return;
+                const supplier = data.suppliers.find(s => s.id === p.supplierId)?.name || '未知';
+                
+                const price = parseFloat(item.customPrice);
+                const qty = parseInt(item.quantity);
+                const taxStatus = item.taxStatus || '含稅';
+                let subtotal = price * qty;
+                if(taxStatus === '不含稅') subtotal *= 1.05;
+                subtotal += item.customShipping;
+
+                exportData.push([
+                    supplier,
+                    p.prodName,
+                    p.spec || '',
+                    p.deliveryTime || '',
+                    qty,
+                    price,
+                    taxStatus,
+                    item.customShipping,
+                    item.customNote || '',
+                    Math.round(subtotal)
+                ]);
+            });
+
+            saveAsExcel(exportData, "採購清單", `採購清單匯出_${getTodayStr()}.xlsx`);
+            showToast('已下載採購清單 Excel', 'bg-green-600');
+        }
+
+        function exportQuoteExcel(quoteId) {
+            const quote = data.clientQuotes.find(q => q.id === quoteId);
+            if (!quote) return;
+
+            const exportData = [];
+            exportData.push(["報價單號", quote.id]);
+            exportData.push(["客戶名稱", quote.clientName]);
+            exportData.push(["日期", quote.date]);
+            exportData.push(["狀態", quote.status]);
+            exportData.push(["備註", quote.note]);
+            exportData.push([]); // 空行
+            
+            const headers = ["產品名稱", "規格", "單價(報價)", "數量", "小計"];
+            exportData.push(headers);
+
+            quote.items.forEach(item => {
+                const finalPrice = item.salesPrice !== undefined ? item.salesPrice : item.price;
+                exportData.push([
+                    item.prodName,
+                    item.spec,
+                    finalPrice,
+                    item.quantity,
+                    finalPrice * item.quantity
+                ]);
+            });
+
+            saveAsExcel(exportData, "報價單", `報價單_${quote.clientName}_${quote.date}.xlsx`);
+        }
+
+        // v11.0: 新增發票匯出功能
+        function exportInvoiceExcel() {
+            if (!data.orders || data.orders.length === 0) return showToast('無訂單資料可匯出', 'bg-red-500');
+
+            const exportData = [];
+            // 標題列：訂單編號、出貨日、到貨日、產品項目、發票日期、發票號碼、供應商
+            const headers = ["訂單編號", "出貨日", "到貨日", "產品名稱", "規格", "數量", "單價", "發票日期", "發票號碼", "供應商"];
+            exportData.push(headers);
+
+            data.orders.forEach(order => {
+                order.items.forEach(item => {
+                    const p = data.products.find(prod => prod.id === item.productId);
+                    const prodName = p ? p.prodName : '(已刪除)';
+                    const spec = p ? p.spec : '';
+                    const supplierName = p ? (data.suppliers.find(s=>s.id === p.supplierId)?.name) : '未知';
+
+                    exportData.push([
+                        order.id,
+                        order.shipDate || '',
+                        order.arrivalDate || '',
+                        prodName,
+                        spec,
+                        item.quantity,
+                        item.customPrice,
+                        order.supplierInvoiceDate || '',
+                        order.invoiceNumber || '',
+                        supplierName
+                    ]);
+                });
+            });
+
+            saveAsExcel(exportData, "發票明細", `發票明細匯出_${getTodayStr()}.xlsx`);
+            showToast('已下載發票明細 Excel', 'bg-green-600');
+        }
+
+        function exportToExcel(type) {
+            let exportData = [];
+            let fileName = "";
+            let sheetName = "";
+            
+            if (type === 'suppliers') {
+                sheetName = "供應商";
+                exportData.push(["系統ID", "供應商名稱", "公司統編", "聯絡人", "電話", "網址", "地址", "備註"]);
+                data.suppliers.forEach(s => {
+                    exportData.push([s.id, s.name, s.taxId, s.contact, s.phone, s.website, s.address, s.note]);
+                });
+                fileName = `供應商清單_${getTodayStr()}.xlsx`;
+            
+            } else if (type === 'products') {
+                sheetName = "產品";
+                exportData.push(["系統ID", "供應商名稱", "產品名稱", "規格", "交期", "單價", "稅務", "參考運費", "產品網址", "產品備註"]);
+                data.products.forEach(p => {
+                    const supplier = data.suppliers.find(s => s.id === p.supplierId)?.name || '未知';
+                    exportData.push([p.id, supplier, p.prodName, p.spec, p.deliveryTime, p.price, p.isTaxIncl, p.shipping, p.prodUrl, p.prodNote]);
+                });
+                fileName = `產品報價單_${getTodayStr()}.xlsx`;
+            
+            } else if (type === 'orders') {
+                sheetName = "訂單明細";
+                // v11.3: 加入付款日期
+                exportData.push(["訂單編號", "建檔時間", "原始單號", "報價單號", "下單日期", "狀態", "付款狀態", "付款日期", "發票號碼", "廠商發票日期", "物流商", "物流單號", "出貨日", "到貨日", "訂單備註", "訂單折扣", "供應商名稱", "產品名稱", "規格", "數量", "成交單價", "成交運費", "稅別", "項目備註", "總金額"]);
+                
+                data.orders.forEach(order => {
+                    // Excel 匯出也需依循新的稅務邏輯計算總額
+                    let totalPayable = 0;
+                    order.items.forEach(item => {
+                        const itemBase = (item.customPrice * item.quantity) + item.customShipping;
+                        if(item.taxStatus === '不含稅') {
+                            totalPayable += itemBase * 1.05;
+                        } else {
+                            totalPayable += itemBase;
+                        }
+                    });
+                    const finalTotal = Math.round(totalPayable - (order.discount || 0));
+
+                    order.items.forEach(item => {
+                        const p = data.products.find(prod => prod.id === item.productId);
+                        const supplierName = p ? (data.suppliers.find(s=>s.id === p.supplierId)?.name) : '未知';
+                        const prodName = p ? p.prodName : '(已刪除)';
+                        const spec = p ? p.spec : '';
+                        
+                        exportData.push([
+                            order.id,
+                            order.createdAt || '', 
+                            order.originalOrderNo || '',
+                            order.quotationNo || '', 
+                            order.date, 
+                            translateStatus(order.status), 
+                            translatePayment(order.paymentStatus), 
+                            order.paymentDate || '', // v11.3
+                            order.invoiceNumber || '',
+                            order.supplierInvoiceDate || '', 
+                            order.logisticsProvider || '',
+                            order.trackingNumber || '',
+                            order.shipDate || '',
+                            order.arrivalDate || '',
+                            order.orderNote || '',
+                            order.discount || 0,
+                            supplierName, prodName, spec, item.quantity, 
+                            item.customPrice, item.customShipping, 
+                            item.taxStatus || '含稅',
+                            item.customNote, 
+                            finalTotal
+                        ]);
+                    });
+                });
+                fileName = `歷史訂單明細_${getTodayStr()}.xlsx`;
+            }
+
+            saveAsExcel(exportData, sheetName, fileName);
+            showToast('匯出成功', 'bg-green-600');
+        }
+
+        // CSV Import Logic (維持原狀，Excel Import 較複雜，此處保留 CSV 匯入功能以相容舊資料)
+        function handleCSVImport(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+            
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                const text = e.target.result;
+                const rows = parseCSV(text);
+                if (rows.length < 2) return showToast('CSV 檔案內容為空或格式錯誤', 'bg-red-500');
+                
+                const headers = rows[0];
+                let type = '';
+                
+                if (headers.includes("公司統編") && headers.includes("供應商名稱")) type = 'suppliers';
+                else if (headers.includes("產品名稱") && headers.includes("單價")) type = 'products';
+                else if (headers.includes("訂單編號") && headers.includes("下單日期")) type = 'orders';
+                
+                if (!type) return showToast('無法識別 CSV 類型，請檢查標題欄位', 'bg-red-500');
+
+                let count = 0;
+                if (type === 'suppliers') count = importSuppliers(rows);
+                else if (type === 'products') count = importProducts(rows);
+                else if (type === 'orders') count = importOrders(rows);
+
+                saveData();
+                renderSuppliers();
+                renderProducts();
+                renderOrders();
+                showToast(`成功匯入 ${count} 筆${type === 'suppliers'?'供應商':type==='products'?'產品':'訂單'}資料`, 'bg-green-600');
+                event.target.value = '';
+            };
+            reader.readAsText(file);
+        }
+
+        function importSuppliers(rows) {
+            let count = 0;
+            rows.slice(1).forEach(row => {
+                if (!row[1]) return;
+                const id = row[0] && row[0].startsWith('s_') ? row[0] : 's_' + Date.now() + Math.random().toString(36).substr(2,4);
+                
+                const supplier = {
+                    id: id,
+                    name: row[1],
+                    taxId: row[2] || '',
+                    contact: row[3] || '',
+                    phone: row[4] || '',
+                    website: row[5] || '',
+                    address: row[6] || '',
+                    note: row[7] || ''
+                };
+
+                const existIdx = data.suppliers.findIndex(s => s.id === supplier.id);
+                if (existIdx !== -1) data.suppliers[existIdx] = supplier;
+                else data.suppliers.push(supplier);
+                count++;
+            });
+            return count;
+        }
+
+        function importProducts(rows) {
+            let count = 0;
+            rows.slice(1).forEach(row => {
+                if (!row[2]) return;
+                
+                let supplierId = '';
+                const supplierName = row[1];
+                if (supplierName) {
+                    const s = data.suppliers.find(sup => sup.name === supplierName);
+                    if (s) supplierId = s.id;
+                }
+
+                const csvId = row[0] && row[0].startsWith('p_') ? row[0] : null;
+                const prodName = row[2];
+                const spec = row[3] || '';
+
+                let existingProductIndex = -1;
+
+                if (csvId) {
+                    existingProductIndex = data.products.findIndex(p => p.id === csvId);
+                }
+
+                if (existingProductIndex === -1) {
+                    existingProductIndex = data.products.findIndex(p => 
+                        p.prodName === prodName && 
+                        p.spec === spec && 
+                        p.supplierId === supplierId
+                    );
+                }
+
+                const finalId = existingProductIndex !== -1 ? data.products[existingProductIndex].id : (csvId || 'p_' + Date.now() + Math.random().toString(36).substr(2,4));
+                
+                const product = {
+                    id: finalId,
+                    supplierId: supplierId,
+                    prodName: prodName,
+                    spec: spec,
+                    deliveryTime: row[4] || '',
+                    price: parseFloat(row[5]) || 0,
+                    isTaxIncl: row[6] || '含稅',
+                    shipping: parseFloat(row[7]) || 0,
+                    prodUrl: row[8] || '',
+                    prodNote: row[9] || ''
+                };
+
+                if (existingProductIndex !== -1) {
+                    data.products[existingProductIndex] = product;
+                } else {
+                    data.products.push(product);
+                }
+                count++;
+            });
+            return count;
+        }
+
+        function importOrders(rows) {
+            let count = 0;
+            const tempOrders = {};
+            const headers = rows[0]; 
+            
+            // 欄位索引對應
+            const idxCreatedAt = headers.indexOf("建檔時間");
+            const idxOriginalNo = headers.indexOf("原始單號");
+            const idxOrderDate = headers.indexOf("下單日期");
+            const idxStatus = headers.indexOf("狀態");
+            const idxPaymentStatus = headers.indexOf("付款狀態");
+            const idxInvoiceNum = headers.indexOf("發票號碼");
+            const idxInvoiceDate = headers.indexOf("廠商發票日期");
+            const idxLogistics = headers.indexOf("物流商");
+            const idxTracking = headers.indexOf("物流單號");
+            const idxShip = headers.indexOf("出貨日");
+            const idxArrival = headers.indexOf("到貨日");
+            const idxNote = headers.indexOf("訂單備註");
+            const idxDiscount = headers.indexOf("訂單折扣"); 
+            const idxTaxStatus = headers.indexOf("稅別"); 
+            const idxQuoteNo = headers.indexOf("報價單號"); // v11.0
+
+            let idxProdName = 11;
+            if (idxNote > -1) {
+                idxProdName = idxNote + 3; 
+            } else {
+                if(headers.includes("產品名稱")) idxProdName = headers.indexOf("產品名稱");
+            }
+
+            rows.slice(1).forEach(row => {
+                const orderId = row[0];
+                if (!orderId) return;
+
+                if (!tempOrders[orderId]) {
+                    tempOrders[orderId] = {
+                        id: orderId,
+                        createdAt: idxCreatedAt > -1 ? row[idxCreatedAt] : '', 
+                        date: idxOrderDate > -1 ? row[idxOrderDate] : row[2], 
+                        status: idxStatus > -1 ? reverseStatus(row[idxStatus]) : reverseStatus(row[3]),
+                        paymentStatus: idxPaymentStatus > -1 ? reversePayment(row[idxPaymentStatus]) : 'unpaid',
+                        invoiceNumber: idxInvoiceNum > -1 ? row[idxInvoiceNum] : row[4],
+                        supplierInvoiceDate: idxInvoiceDate > -1 ? row[idxInvoiceDate] : '', 
+                        originalOrderNo: idxOriginalNo > -1 ? row[idxOriginalNo] : '',
+                        quotationNo: idxQuoteNo > -1 ? row[idxQuoteNo] : '', // v11.0
+                        logisticsProvider: idxLogistics > -1 ? row[idxLogistics] : '',
+                        trackingNumber: idxTracking > -1 ? row[idxTracking] : '',
+                        shipDate: idxShip > -1 ? row[idxShip] : '',
+                        arrivalDate: idxArrival > -1 ? row[idxArrival] : '',
+                        orderNote: idxNote > -1 ? row[idxNote] : '',
+                        discount: idxDiscount > -1 ? (parseFloat(row[idxDiscount]) || 0) : 0,
+
+                        items: [],
+                        totalAmount: 0 
+                    };
+                }
+                
+                const prodName = row[idxProdName];
+                const p = data.products.find(prod => prod.prodName === prodName);
+                const productId = p ? p.id : 'unknown_' + Date.now();
+
+                // 假設欄位順序固定 (v10.0 增加一欄 Payment 後，後續索引會變動，建議使用 indexOf 抓取)
+                const qtyIndex = idxProdName + 2; 
+                const priceIndex = qtyIndex + 1;
+                const shipIndex = priceIndex + 1;
+                const taxStIndex = idxTaxStatus > -1 ? idxTaxStatus : -1; 
+                const itemNoteIndex = (taxStIndex > -1) ? taxStIndex + 1 : shipIndex + 1;
+
+                tempOrders[orderId].items.push({
+                    productId: productId,
+                    quantity: parseInt(row[qtyIndex]) || 1,
+                    customPrice: parseFloat(row[priceIndex]) || 0,
+                    customShipping: parseFloat(row[shipIndex]) || 0,
+                    taxStatus: taxStIndex > -1 ? row[taxStIndex] : '含稅',
+                    customNote: row[itemNoteIndex] || ''
+                });
+            });
+
+            for (const oid in tempOrders) {
+                const ord = tempOrders[oid];
+                let itemSubtotal = 0; 
+                let taxTotal = 0;
+                let shipTotal = 0;
+                
+                ord.items.forEach(item => {
+                    const sub = item.customPrice * item.quantity;
+                    itemSubtotal += sub;
+                    shipTotal += item.customShipping;
+                    if(item.taxStatus === '不含稅') taxTotal += sub * 0.05;
+                });
+                
+                ord.totalAmount = itemSubtotal + taxTotal + shipTotal - (ord.discount || 0);
+                
+                const existIdx = data.orders.findIndex(o => o.id === ord.id);
+                if (existIdx !== -1) {
+                    data.orders[existIdx] = ord;
+                } else {
+                    data.orders.push(ord);
+                }
+                count++;
+            }
+            return count;
+        }
+
+        function parseCSV(text) {
+            const rows = [];
+            let row = [];
+            let col = "";
+            let inQuotes = false;
+            for (let i = 0; i < text.length; i++) {
+                const char = text[i];
+                const next = text[i+1];
+                if (inQuotes) {
+                    if (char === '"' && next === '"') { col += '"'; i++; }
+                    else if (char === '"') { inQuotes = false; }
+                    else { col += char; }
+                } else {
+                    if (char === '"') { inQuotes = true; }
+                    else if (char === ',') { row.push(col.trim()); col = ""; }
+                    else if (char === '\n' || char === '\r') {
+                        if (col || row.length > 0) { row.push(col.trim()); rows.push(row); }
+                        row = []; col = "";
+                        if (char === '\r' && next === '\n') i++;
+                    } else { col += char; }
+                }
+            }
+            if (col || row.length > 0) { row.push(col.trim()); rows.push(row); }
+            return rows;
+        }
+
+        function getTodayStr() {
+            return new Date().toISOString().split('T')[0];
+        }
+
+        // v11.1 更新狀態翻譯
+        function translateStatus(status) {
+            const map = {
+                'ordered': '已下單',
+                'partial_shipped': '部分出貨',
+                'shipped': '全部出貨',
+                'arrived': '已收貨',
+                'completed': '已驗收完成',
+                'cancelled': '已取消(退)',
+                'pending': '已下單' // backward compatibility
+            };
+            return map[status] || status;
+        }
+
+        // v11.1 更新反向翻譯 (for import)
+        function reverseStatus(text) {
+            const map = {
+                '已下單': 'ordered',
+                '處理中': 'ordered', // backward compatibility
+                '部分出貨': 'partial_shipped',
+                '全部出貨': 'shipped',
+                '已出貨': 'shipped', // backward compatibility
+                '已收貨': 'arrived',
+                '已驗收完成': 'completed',
+                '已完成': 'completed', // backward compatibility
+                '已取消(退)': 'cancelled'
+            };
+            return map[text] || 'ordered';
+        }
+
+        function translatePayment(status) {
+            if (status === 'unpaid') return '未付款';
+            if (status === 'paid') return '已付款';
+            if (status === 'monthly') return '月結';
+            return '未付款';
+        }
+
+        function reversePayment(text) {
+            if (text === '已付款') return 'paid';
+            if (text === '月結') return 'monthly';
+            return 'unpaid';
+        }
+
+        // ================= 通用函式 =================
+
+        function updateSupplierSelect() {
+            // 更新新增產品表單的datalist
+            const newProductDatalist = document.getElementById('supplierListForProduct');
+            if (newProductDatalist) {
+                newProductDatalist.innerHTML = '';
+                data.suppliers.forEach(s => {
+                    const opt = document.createElement('option');
+                    opt.value = s.name;
+                    opt.dataset.id = s.id;
+                    newProductDatalist.appendChild(opt);
+                });
+            }
+            
+            // 更新編輯產品表單的datalist
+            const editProductDatalist = document.getElementById('editSupplierListForProduct');
+            if (editProductDatalist) {
+                editProductDatalist.innerHTML = '';
+                data.suppliers.forEach(s => {
+                    const opt = document.createElement('option');
+                    opt.value = s.name;
+                    opt.dataset.id = s.id;
+                    editProductDatalist.appendChild(opt);
+                });
+            }
+        }
+
+        function openEditSupplier(id) {
+            const s = data.suppliers.find(item => item.id === id);
+            if (!s) return;
+            const form = document.getElementById('editSupplierForm');
+            form.id.value = s.id;
+            form.name.value = s.name;
+            form.taxId.value = s.taxId || '';
+            form.phone.value = s.phone || '';
+            form.contact.value = s.contact || '';
+            form.website.value = s.website || '';
+            form.address.value = s.address || '';
+            form.paymentType.value = s.paymentType || '現金';
+            form.monthlyDays.value = s.monthlyDays || '';
+            form.note.value = s.note || '';
+            
+            // 觸發顯示切換
+            toggleMonthlyDays(form.paymentType, 'editMonthlyDaysWrapper');
+            
+            document.getElementById('modal-edit-supplier').classList.add('modal-active');
+        }
+
+        function openEditProduct(id) {
+            const p = data.products.find(item => item.id === id);
+            if (!p) return;
+            updateSupplierSelect(); 
+            const form = document.getElementById('editProductForm');
+            const supplier = data.suppliers.find(s => s.id === p.supplierId);
+            
+            form.id.value = p.id;
+            document.getElementById('editSupplierId').value = p.supplierId;
+            document.getElementById('editSupplierSearchInput').value = supplier ? supplier.name : '';
+            form.prodName.value = p.prodName;
+            form.deliveryTime.value = p.deliveryTime || '';
+            form.spec.value = p.spec || '';
+            form.prodUrl.value = p.prodUrl || '';
+            form.price.value = p.price || '';
+            form.isTaxIncl.value = p.isTaxIncl || '含稅';
+            form.shipping.value = p.shipping || 0;
+            form.prodNote.value = p.prodNote || '';
+            document.getElementById('modal-edit-product').classList.add('modal-active');
+        }
+
+        function openAddProductModal(supplierId) {
+            const s = data.suppliers.find(item => item.id === supplierId);
+            if (!s) return;
+            
+            const form = document.getElementById('addProductDirectForm');
+            form.reset(); 
+            form.supplierId.value = s.id;
+            document.getElementById('directSupplierName').value = s.name;
+            
+            document.getElementById('modal-add-product-direct').classList.add('modal-active');
+        }
+
+        function closeModal(modalId) {
+            document.getElementById(modalId).classList.remove('modal-active');
+        }
+
+        function saveData() {
+            localStorage.setItem('procurementDataV2', JSON.stringify(data));
+        }
+
+        function deleteSupplier(id) {
+            if (confirm('確定刪除此供應商？相關產品與訂單可能無法正確顯示。')) {
+                data.suppliers = data.suppliers.filter(s => s.id !== id);
+                saveData();
+                renderSuppliers();
+                renderProducts();
+            }
+        }
+
+        function deleteProduct(id) {
+            if (confirm('確定刪除此產品報價？')) {
+                data.products = data.products.filter(p => p.id !== id);
+                saveData();
+                renderProducts();
+            }
+        }
+
+        function showToast(msg, bgColor) {
+            const toast = document.getElementById('toast');
+            toast.textContent = msg;
+            toast.className = `fixed bottom-5 right-5 px-6 py-3 rounded-lg shadow-lg text-white transition-opacity ${bgColor} z-50`;
+            toast.classList.remove('hidden');
+            setTimeout(() => toast.classList.add('hidden'), 3000);
+        }
+
+        function exportData() {
+            const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `採購追蹤系統備份_${getTodayStr()}.json`;
+            a.click();
+        }
+
+        function importData(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                try {
+                    const imported = JSON.parse(e.target.result);
+                    if (imported.suppliers && imported.products) {
+                        data = imported;
+                        if (!data.cart) data.cart = [];
+                        if (!data.orders) data.orders = [];
+                        if (!data.clientQuotes) data.clientQuotes = [];
+                        if (!data.supplierInquiries) data.supplierInquiries = [];
+                        
+                        saveData();
+                        window.location.reload(); 
+                    }
+                } catch (err) {
+                    showToast('導入失敗：檔案格式錯誤', 'bg-red-500');
+                }
+            };
+            reader.readAsText(file);
+        }
+    </script>
+</body>
+</html>
