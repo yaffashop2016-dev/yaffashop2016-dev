@@ -1,0 +1,2140 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>企業薪資與成本管理系統</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;700&display=swap');
+        body { font-family: 'Noto Sans TC', sans-serif; background-color: #f8fafc; }
+        .card { background: white; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+        .tab-active { border-bottom: 2px solid #2563eb; color: #2563eb; font-weight: 600; }
+        input, select { border: 1px solid #e2e8f0; padding: 0.5rem; border-radius: 4px; font-size: 14px; }
+        table { width: 100%; border-collapse: collapse; }
+        th { background-color: #1e293b; color: white; text-align: left; padding: 0.75rem; font-weight: 600; }
+        td { padding: 0.75rem; border-bottom: 1px solid #f1f5f9; }
+        tr:hover { background-color: #f8fafc; }
+        .bonus-item { display: flex; gap: 0.5rem; margin-bottom: 0.5rem; align-items: center; }
+        .bonus-item input { flex: 1; }
+        .bonus-item button { padding: 0.25rem 0.5rem; font-size: 12px; }
+        .modal-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; z-index: 1000; }
+        .modal-content { background: white; border-radius: 8px; padding: 2rem; max-width: 600px; max-height: 90vh; overflow-y: auto; }
+    </style>
+</head>
+<body class="p-4 md:p-8">
+    <div class="max-w-7xl mx-auto">
+        <!-- Header -->
+        <header class="mb-8 flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div>
+                <h1 class="text-3xl font-bold text-slate-800">企業薪資管理系統</h1>
+                <p class="text-slate-500">長期維護、查核、報稅、成本分析一站式工具</p>
+            </div>
+            <div class="flex gap-2">
+                <button onclick="exportBackup()" class="bg-slate-600 text-white px-4 py-2 rounded hover:bg-slate-700 transition">系統備份 (JSON)</button>
+                <label class="bg-slate-100 text-slate-700 px-4 py-2 rounded cursor-pointer hover:bg-slate-200 border border-slate-300">
+                    還原資料 <input type="file" id="importFile" class="hidden" accept=".json" onchange="importBackup(event)">
+                </label>
+            </div>
+        </header>
+
+        <!-- Navigation Tabs -->
+        <nav class="flex border-b-2 border-slate-300 mb-6 gap-6 text-slate-500 overflow-x-auto whitespace-nowrap">
+            <button onclick="showSection('payroll')" id="tab-payroll" class="pb-3 px-2 tab-active text-base">薪資發放與計算</button>
+            <button onclick="showSection('records')" id="tab-records" class="pb-3 px-2 text-base">歷史發薪紀錄</button>
+            <button onclick="showSection('employees')" id="tab-employees" class="pb-3 px-2 text-base">員工基本資料</button>
+            <button onclick="showSection('settings')" id="tab-settings" class="pb-3 px-2 text-base">投保級距與設定</button>
+            <button onclick="showSection('reports')" id="tab-reports" class="pb-3 px-2 text-base">年度報稅與成本分析</button>
+        </nav>
+
+        <!-- Section: Payroll Calculation -->
+        <section id="sec-payroll" class="section-content">
+            <div class="card p-6">
+                <h2 class="text-2xl font-bold mb-6">本月薪資結算</h2>
+                <p class="text-sm text-gray-600 mb-4">
+                    步驟：先選擇薪資月份與發薪日，然後為每位員工輸入出勤天數、請假日數與加班/獎金。
+                    系統會根據級距計算勞保、健保自付額作為預設，可直接修改，實際扣除以您填寫為準。<br>
+                    公式說明：<br>
+                    應發 = 本薪 + 加班獎金 + 固定津貼 - 請假扣薪<br>
+                    實發 = 應發 - 勞保 - 健保 - 勞退自提
+                </p>
+                <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+                    <div>
+                        <label class="block text-sm font-medium mb-2">薪資月份</label>
+                        <input type="month" id="payMonth" class="w-full">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium mb-2">發薪日期</label>
+                        <input type="date" id="payDate" class="w-full">
+                    </div>
+                    <div class="flex items-end">
+                        <button onclick="saveMonthlyPayroll()" class="w-full bg-blue-600 text-white px-6 py-2 rounded-lg font-bold hover:bg-blue-700 h-10">儲存本月發薪資料</button>
+                    </div>
+                </div>
+                
+                <div class="overflow-x-auto border rounded">
+                    <table id="payrollTable">
+                        <thead>
+                            <tr>
+                                <th class="w-20">工作天數</th>
+                                <th class="w-24">員工</th>
+                                <th class="w-20">本薪</th>
+                                <th class="w-36">加班費/獎金/津貼</th>
+                                <th class="w-40">請假 (事/病/特)</th>
+                                <th class="w-28">特休剩餘</th>
+                                <th class="w-32">扣除額<br/><span class="text-xs">(勞保/健保可改)</span></th>
+                                <th class="w-24">應發</th>
+                                <th class="w-24">實發</th>
+                                <th class="w-20">操作</th>
+                            </tr>
+                        </thead>
+                        <tbody id="payrollBody">
+                            <!-- JS dynamic content -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+
+        <!-- Section: Records -->
+        <section id="sec-records" class="section-content hidden">
+            <div class="card p-6">
+                <div class="flex justify-between items-center mb-4">
+                    <h2 class="text-2xl font-bold">歷史薪資紀錄</h2>
+                </div>
+                <p class="text-sm text-gray-600 mb-4">
+                    此頁顯示已儲存的薪資資料，可依年月、姓名或備註篩選並匯出。
+                    扣除額已拆分為勞保、健保與勞退，點擊「編輯」可修改各項數值。
+                </p>
+                <div class="flex gap-2 mb-4">
+                    <button onclick="exportPayrollToExcel()" class="bg-green-600 text-white px-4 py-2 rounded hover:bg-green-700">匯出月份總表 (.xlsx)</button>
+                    <button onclick="fixSalaryData()" class="bg-orange-600 text-white px-4 py-2 rounded hover:bg-orange-700">🔧 修復薪資數據</button>
+                </div>
+                <!-- filters -->
+                <div class="flex gap-2 mb-4 items-center">
+                    <input type="month" id="recordsFilterMonth" class="p-2 border rounded" placeholder="年/月" />
+                    <input type="text" id="recordsFilterName" class="p-2 border rounded" placeholder="員工姓名" />
+                    <input type="text" id="recordsFilterNote" class="p-2 border rounded" placeholder="備註" />
+                    <button onclick="renderRecords()" class="bg-blue-500 text-white px-3 py-1 rounded">篩選</button>
+                    <button onclick="clearRecordFilters()" class="bg-gray-400 text-white px-3 py-1 rounded">清除</button>
+                    <button onclick="exportIndividualPayrolls()" class="bg-green-600 text-white px-3 py-1 rounded">匯出在職員工個別薪資單</button>
+                </div>
+                <div class="overflow-x-auto border rounded">
+                    <table class="min-w-full">
+                        <thead>
+                            <tr>
+                                <th>年月</th>
+                                <th>姓名</th>
+                                <th>本薪</th>
+                                <th>獎金/津貼</th>
+                                <th>明細</th>
+                                <th>應發總額</th>
+                                <th>勞保自付</th>
+                        <th>健保自付</th>
+                        <th>勞退自付</th>
+                                <th>實發總額</th>
+                                <th>出勤天數</th>
+                                <th>備註</th>
+                                <th>操作</th>
+                            </tr>
+                        </thead>
+                        <tbody id="recordsBody"></tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+
+        <!-- Section: Employees -->
+        <section id="sec-employees" class="section-content hidden">
+            <div class="card p-6">
+                <div class="flex justify-between items-center mb-4">
+                    <h2 class="text-2xl font-bold">員工管理</h2>
+                </div>
+                <p class="text-sm text-gray-600 mb-4">
+                    在這裡新增或修改員工基本資料，特別注意勞保/健保級距及勞退自提率，這些數值會影響扣除額計算。
+                </p>
+                    <button onclick="openAddEmployeeModal()" class="bg-indigo-600 text-white px-4 py-2 rounded hover:bg-indigo-700">+ 新增員工</button>
+                </div>
+                <div class="overflow-x-auto border rounded">
+                    <table id="employeeTable">
+                        <thead>
+                            <tr>
+                                <th>姓名</th>
+                                <th>本薪</th>
+                                <th>勞保級距</th>
+                                <th>健保級距</th>
+                                <th>勞退自提 %</th>
+                                <th>年度特休天數</th>
+                                <th>特休已使用天數</th>
+                                <th>特休剩餘天數</th>
+                                <th>狀態</th>
+                                <th>入職</th>
+                                <th>離職</th>
+                                <th>銀行</th>
+                                <th>帳號</th>
+                                <th>操作</th>
+                            </tr>
+                        </thead>
+                        <tbody id="employeeBody"></tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+
+        <!-- Section: Settings -->
+        <section id="sec-settings" class="section-content hidden">
+            <p class="text-sm text-gray-600 mb-4">
+                在此設定勞保、健保費率、請假扣薪比例與其他參數，修改後記得點擊儲存或等待自動儲存。
+            </p>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div class="card p-6">
+                    <h2 class="text-xl font-bold mb-4">勞保/健保參數設定</h2>
+                    <div class="space-y-4">
+                        <div>
+                            <label class="block text-sm font-medium mb-2">勞保費率 (含就保/職災)</label>
+                            <input type="number" step="0.01" id="rateLabor" class="w-full" value="12.5">
+                            <p class="text-xs text-slate-400 mt-1">目前法定約 <span id="labRateDisplay">12.50</span>%</p>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium mb-2">健保費率</label>
+                            <input type="number" step="0.01" id="rateHealth" class="w-full" value="5.17">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium mb-2">勞退公司提繳率 (%)</label>
+                            <input type="number" step="0.1" id="ratePension" class="w-full" value="6">
+                        </div>
+                    </div>
+                    <div class="flex justify-end mt-4">
+                        <button id="saveSettingsBtn" onclick="saveSettings()" class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700">儲存設定</button>
+                    </div>
+                </div>
+                <div class="card p-6">
+                    <h2 class="text-xl font-bold mb-4">請假扣薪設定</h2>
+                    <div class="space-y-4">
+                        <div>
+                            <label class="block text-sm font-medium mb-2">事假扣薪比例</label>
+                            <select id="leaveFact" class="w-full">
+                                <option value="1">全扣 (1/30日薪)</option>
+                                <option value="0.5">半薪</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium mb-2">病假扣薪比例</label>
+                            <select id="leaveSick" class="w-full">
+                                <option value="0.5">扣半薪 (1/60日薪)</option>
+                                <option value="1">全扣</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium mb-2">特假扣薪比例</label>
+                            <select id="leaveSpecial" class="w-full">
+                                <option value="0">不扣薪</option>
+                                <option value="0.5">扣半薪</option>
+                                <option value="1">全扣</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+                <div class="card p-6">
+                    <h2 class="text-xl font-bold mb-4">固定加班/獎金項目</h2>
+                    <div id="fixedAllowancesContainer" class="space-y-2 mb-4">
+                        <!-- 動態生成固定項目 -->
+                    </div>
+                    <button onclick="addFixedAllowance()" class="bg-indigo-600 text-white px-4 py-2 rounded hover:bg-indigo-700">+ 新增固定項目</button>
+                </div>
+                <!-- 勞保/健保級距表管理 -->
+                <div class="card p-6">
+                    <h2 class="text-xl font-bold mb-4">投保級距表管理</h2>
+                    <p class="text-sm text-gray-600 mb-4">根據年度法規設定投保級距。級距會逐年變動，請按年度分別管理。</p>
+                    <div class="mb-4">
+                        <label class="block text-sm font-medium mb-2">選擇年度</label>
+                        <div class="flex gap-2 items-center mb-4">
+                            <select id="insuranceYearSelect" class="p-2 border rounded" onchange="renderInsuranceLevelsByYear()">
+                                <option value="">-- 請選擇年度 --</option>
+                            </select>
+                            <input type="number" id="newInsuranceYear" class="p-2 border rounded w-24" placeholder="輸入新年度" min="2020" max="2050">
+                            <button onclick="addInsuranceYear()" class="bg-blue-600 text-white px-3 py-2 rounded hover:bg-blue-700">新增年度</button>
+                        </div>
+                    </div>
+                    <div id="insuranceLevelEditorContainer" class="grid grid-cols-2 gap-6">
+                        <!-- render dynamically by year -->
+                    </div>
+                </div>
+                <!-- 健保眷口係數 -->
+                <div class="card p-6">
+                    <h2 class="text-xl font-bold mb-4">健保計算參數</h2>
+                    <div class="space-y-4">
+                        <div>
+                            <label class="block text-sm font-medium mb-2">健保眷口數係數</label>
+                            <input type="number" step="0.01" id="healthFamilyCoeff" class="w-full" value="1.56" min="0.5" max="5">
+                            <p class="text-xs text-slate-400 mt-1">預設 1.56（含平均眷口數），公式：投保薪資 × 5.17% × 30% × 此係數</p>
+                        </div>
+                    </div>
+                    <div class="flex justify-end mt-4">
+                        <button id="saveInsuranceParamsBtn" onclick="saveInsuranceParams()" class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700">儲存級距與參數</button>
+                    </div>
+                </div>
+                <!-- 常用收款銀行管理 -->
+                <div class="card p-6">
+                    <h2 class="text-xl font-bold mb-4">常用收款銀行</h2>
+                    <div id="bankListContainer" class="space-y-2 mb-4">
+                        <!-- 動態生成銀行項目 -->
+                    </div>
+                    <button onclick="addBank()" class="bg-indigo-600 text-white px-4 py-2 rounded hover:bg-indigo-700">+ 新增銀行</button>
+                </div>
+            </div>
+        </section>
+
+        <!-- Section: Reports -->
+        <section id="sec-reports" class="section-content hidden">
+            <p class="text-sm text-gray-600 mb-4">
+                選擇年度後產生分析報表，可匯出 Excel 檔案並新增各類帳單以便核對成本。
+            </p>
+            <div class="grid grid-cols-1 gap-6">
+                <div class="card p-6">
+                    <h2 class="text-2xl font-bold mb-4">年度彙總與成本核對</h2>
+                    <div class="flex gap-4 mb-6">
+                        <select id="reportYear" class="p-2 border rounded">
+                            <option value="2024">2024 年度</option>
+                            <option value="2025" selected>2025 年度</option>
+                            <option value="2026">2026 年度</option>
+                        </select>
+                        <button onclick="generateAnnualReport()" class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700">產生分析報表</button>
+                        <button onclick="exportAnnualExcel()" class="bg-green-700 text-white px-4 py-2 rounded hover:bg-green-800">匯出年度總表 (.xlsx)</button>
+                        <div class="ml-4">
+                            <label class="block text-sm font-medium">帳單管理</label>
+                            <div class="flex gap-2 mt-2">
+                                <select id="billType" class="p-2 border">
+                                    <option value="labor">勞保</option>
+                                    <option value="health">健保</option>
+                                    <option value="pension">勞退</option>
+                                </select>
+                                <input type="date" id="billDate" class="p-2 border" />
+                                <input type="number" id="billAmount" placeholder="金額" class="p-2 border" />
+                                <input type="text" id="billNote" placeholder="備註" class="p-2 border" />
+                                <button onclick="addBill()" class="bg-indigo-600 text-white px-3 rounded">新增</button>
+                            </div>
+                        </div>
+                        </div>
+                        <!-- bill list shown when viewing reports -->
+                        <div id="reportBillList" class="mt-4 text-sm"></div>
+                        <div id="reportResult" class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        <div class="bg-slate-50 p-4 rounded border border-slate-200">
+                            <p class="text-sm text-slate-500">年度薪資總支出</p>
+                            <h3 id="statSalary" class="text-2xl font-bold text-slate-800">$ 0</h3>
+                        </div>
+                        <div class="bg-slate-50 p-4 rounded border border-slate-200">
+                            <p class="text-sm text-slate-500">公司負擔 (細項)</p>
+                            <div id="statCompanyCostDetail" class="text-sm text-slate-700 leading-relaxed">勞保: $0<br>健保: $0<br>勞退: $0</div>
+                        </div>
+                        <div class="bg-slate-50 p-4 rounded border border-slate-200">
+                            <p class="text-sm text-slate-500">員工人數 (平均)</p>
+                            <h3 id="statEmpCount" class="text-2xl font-bold text-slate-800">0 人</h3>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </div>
+
+    <!-- Modal: Add/Edit Employee -->
+    <div id="employeeModal" class="modal-overlay hidden" onclick="if(event.target === this) closeEmployeeModal()">
+        <div class="modal-content">
+            <h2 class="text-2xl font-bold mb-4">新增/編輯員工</h2>
+            <!-- arrange fields in a 4-column grid for better horizontal layout -->
+            <div class="grid grid-cols-4 gap-4">
+                <div>
+                    <label class="block text-sm font-medium mb-1">員工編號</label>
+                    <input type="text" id="empCode" class="w-full" placeholder="請輸入員工編號">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium mb-1">姓名</label>
+                    <input type="text" id="empName" class="w-full">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium mb-1">本薪</label>
+                    <input type="number" id="empBaseSalary" class="w-full" value="30000">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium mb-1">勞保級距</label>
+                    <input type="number" id="empLaborLevel" class="w-full" value="30300">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium mb-1">健保級距</label>
+                    <input type="number" id="empHealthLevel" class="w-full" value="30300">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium mb-1">勞退自提 %</label>
+                    <input type="number" id="empPensionRate" class="w-full" value="0">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium mb-1">年度特休天數</label>
+                    <input type="number" id="empAnnualSpecial" class="w-full" value="0" min="0">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium mb-1">收款人</label>
+                    <input type="text" id="empAccountHolder" class="w-full">
+                </div>
+                <div class="col-span-2">
+                    <label class="block text-sm font-medium mb-1">銀行名稱</label>
+                       <select id="empBankName" class="w-full" onchange="onBankSelected()">
+                        <option value="">請選擇銀行</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium mb-1">銀行代號</label>
+                    <input type="text" id="empBankCode" class="w-full" maxlength="3">
+                </div>
+                <div class="col-span-2">
+                    <label class="block text-sm font-medium mb-1">分行名稱</label>
+                       <select id="empBranchName" class="w-full" disabled>
+                           <option value="">請先選擇銀行</option>
+                       </select>
+                </div>
+                <div class="col-span-2">
+                    <label class="block text-sm font-medium mb-1">帳戶號碼</label>
+                    <input type="text" id="empAccountNumber" class="w-full">
+                </div>
+                   <div>
+                       <label class="block text-sm font-medium mb-1">員工狀態</label>
+                       <select id="empStatus" class="w-full">
+                           <option value="在職">在職</option>
+                           <option value="離職">離職</option>
+                       </select>
+                   </div>
+                   <div>
+                       <label class="block text-sm font-medium mb-1">入職日期</label>
+                       <input type="date" id="empStartDate" class="w-full">
+                   </div>
+                   <div>
+                       <label class="block text-sm font-medium mb-1">離職日期</label>
+                       <input type="date" id="empEndDate" class="w-full">
+                   </div>
+                <div class="col-span-4 flex gap-2 pt-4">
+                    <button onclick="saveEmployeeModal()" class="flex-1 bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700">保存</button>
+                    <button onclick="closeEmployeeModal()" class="flex-1 bg-slate-400 text-white px-4 py-2 rounded hover:bg-slate-500">取消</button>
+                </div>
+                <div class="col-span-4 mt-4 card p-4">
+                    <h3 class="text-lg font-semibold mb-2">調薪管理</h3>
+                    <div class="mb-3 flex gap-2">
+                        <input type="date" id="salaryAdjustDate" class="border p-2 text-sm">
+                        <input type="number" id="salaryAdjustAmount" placeholder="調薪金額" class="border p-2 text-sm flex-1">
+                        <input type="text" id="salaryAdjustNote" placeholder="備註" class="border p-2 text-sm flex-1">
+                        <button onclick="addSalaryAdjustment()" class="bg-green-600 text-white px-3 py-2 rounded hover:bg-green-700">新增調薪</button>
+                    </div>
+                    <div id="salaryHistoryContainer" class="space-y-2 max-h-40 overflow-y-auto"></div>
+                </div>
+                <div class="col-span-4 mt-4 card p-4">
+                    <h3 class="text-lg font-semibold mb-2">薪資紀錄</h3>
+                    <div id="empRecordContainer" class="text-sm"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal: Bonus Details -->
+    <div id="bonusModal" class="modal-overlay hidden" onclick="if(event.target === this) closeBonusModal()">
+        <div class="modal-content">
+            <h2 class="text-2xl font-bold mb-4" id="bonusModalTitle">員工 - 加班費/獎金/津貼</h2>
+            <div id="bonusItemsContainer" class="space-y-3 mb-6">
+                <!-- 動態新增獎金條目 -->
+            </div>
+            <button onclick="addBonusItem()" class="w-full bg-indigo-600 text-white px-4 py-2 rounded hover:bg-indigo-700 mb-4">+ 新增項目</button>
+            <div class="flex gap-2">
+                <button onclick="saveBonusItems()" class="flex-1 bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700">保存</button>
+                <button onclick="closeBonusModal()" class="flex-1 bg-slate-400 text-white px-4 py-2 rounded hover:bg-slate-500">取消</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal: Record Edit -->
+    <div id="recordModal" class="modal-overlay hidden" onclick="if(event.target === this) closeRecordModal()">
+        <div class="modal-content max-w-lg">
+            <h2 class="text-2xl font-bold mb-4">編輯薪資紀錄</h2>
+            <div class="space-y-4">
+                <div>
+                    <label class="block text-sm font-medium mb-1">年月</label>
+                    <input type="month" id="recMonth" class="w-full border p-2" />
+                </div>
+                <div>
+                    <label class="block text-sm font-medium mb-1">發薪日</label>
+                    <input type="date" id="recPayDate" class="w-full border p-2" />
+                </div>
+                <div>
+                    <label class="block text-sm font-medium mb-1">員工</label>
+                    <select id="recEmpSelect" class="w-full border p-2"></select>
+                </div>
+                <div class="flex gap-2">
+                    <div class="flex-1">
+                        <label class="block text-sm font-medium mb-1">出勤天數</label>
+                        <input type="number" id="recWorkdays" min="0" class="w-full border p-2" />
+                    </div>
+                    <div class="flex-1">
+                        <label class="block text-sm font-medium mb-1">備註</label>
+                        <input type="text" id="recNote" class="w-full border p-2" />
+                    </div>
+                </div>
+                <div class="flex gap-2">
+                    <div class="flex-1">
+                        <label class="block text-sm font-medium mb-1">餐費扣除</label>
+                        <input type="number" id="recMealExpense" min="0" step="1" class="w-full border p-2" />
+                    </div>
+                    <div class="flex-1">
+                        <label class="block text-sm font-medium mb-1">交通費扣除</label>
+                        <input type="number" id="recTransportExpense" min="0" step="1" class="w-full border p-2" />
+                    </div>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium mb-1">請假 (事/病/特)</label>
+                    <div class="flex gap-2">
+                        <input type="number" id="recLvF" placeholder="事" min="0" step="0.5" class="w-1/3 border p-2" />
+                        <input type="number" id="recLvS" placeholder="病" min="0" step="0.5" class="w-1/3 border p-2" />
+                        <input type="number" id="recLvSp" placeholder="特" min="0" step="0.5" class="w-1/3 border p-2" />
+                    </div>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium mb-1">加班費/獎金/津貼</label>
+                    <div id="recBonusEditor" class="space-y-2 mb-2"></div>
+                    <button onclick="addRecordBonusItem()" class="bg-indigo-600 text-white px-4 py-2 rounded hover:bg-indigo-700">+ 新增項目</button>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium mb-1">勞保扣除</label>
+                    <input type="number" id="recDeductLabor" class="w-full border p-2" step="1" min="0">
+                    <p class="text-xs text-slate-400 mt-1">預設為計算值，可直接修改。</p>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium mb-1">健保扣除</label>
+                    <input type="number" id="recDeductHealth" class="w-full border p-2" step="1" min="0">
+                    <p class="text-xs text-slate-400 mt-1">預設為計算值，可直接修改。</p>
+                </div>
+            </div>
+            <div class="flex gap-2 mt-4">
+                <button onclick="saveRecordModal()" class="flex-1 bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700">保存</button>
+                <button onclick="closeRecordModal()" class="flex-1 bg-slate-400 text-white px-4 py-2 rounded hover:bg-slate-500">取消</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal: Print Payroll Slip -->
+    <div id="printSlipModal" class="modal-overlay hidden" onclick="if(event.target === this) closePrintSlipModal()">
+        <div class="modal-content max-w-4xl">
+            <div class="flex justify-between items-center mb-4">
+                <h2 class="text-2xl font-bold">薪資條預覽</h2>
+                <div class="flex gap-2">
+                    <button onclick="window.print()" class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700">🖨️ 列印</button>
+                    <button onclick="closePrintSlipModal()" class="bg-gray-400 text-white px-4 py-2 rounded hover:bg-gray-500">關閉</button>
+                </div>
+            </div>
+            <div id="slipContent" class="bg-white p-6 border">
+                <!-- 薪資條內容將動態插入這裡 -->
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // --- Data Structure ---
+        let state = {
+            employees: [],
+            records: [],
+            bonusItems: {}, // 以 empId 為 key 存儲獎金明細
+            leaveHistory: {}, // 以 empId 為 key 存儲請假紀錄
+            workdays: {}, // 以 empId 為 key 存儲本月出勤天數
+            settings: {
+                // defaults can be overridden by saved data
+                rateLabor: 12.5,
+                rateHealth: 5.17,
+                ratePension: 6,
+                healthFamilyCoeff: 1.56,  // 健保眷口數係數（平均）
+                leaveFact: 1,
+                leaveSick: 0.5,
+                leaveSpecial: 0,
+                fixedAllowances: [], // 每日固定津貼
+                insuranceLevels: {
+                    // key = year (如 2025, 2026)，value = { labor: [], health: [] }
+                    2025: { labor: [24000, 30300, 36300, 45800], health: [24000, 30300, 36300, 45800] },
+                    2026: { labor: [24000, 30300, 36300, 45800], health: [24000, 30300, 36300, 45800] }
+                }
+            }
+        };
+
+        let currentEditingEmpId = null;
+        let currentSalaryHistory = [];
+        let currentBonusEmpId = null;
+
+        // helper to enforce formatting on settings inputs
+        function attachSettingsInputHandlers() {
+            ['rateLabor','rateHealth','ratePension'].forEach(id => {
+                const el = document.getElementById(id);
+                if (!el) return;
+                el.addEventListener('blur', () => {
+                    let v = parseFloat(el.value) || 0;
+                    if (id === 'ratePension') {
+                        el.value = v.toFixed(1);
+                    } else {
+                        el.value = v.toFixed(2);
+                    }
+                });
+                // auto-save when changed so user doesn't forget
+                el.addEventListener('change', () => {
+                    saveSettings();
+                });
+            });
+        }
+
+        // --- Core Functions ---
+        window.onload = () => {
+            const saved = localStorage.getItem('payroll_system_db');
+            if (saved) {
+                try {
+                    state = JSON.parse(saved);
+                } catch (e) {
+                    console.error('Failed to parse saved state, resetting', e);
+                    state = {};
+                }
+            }
+            // ensure required sub‑objects exist (backwards compatibility)
+            state.employees = state.employees || [];
+            state.records = state.records || [];
+            state.bonusItems = state.bonusItems || {};
+            state.leaveHistory = state.leaveHistory || {};
+            state.workdays = state.workdays || {};
+            state.settings = state.settings || {};
+            state.settings.rateLabor = state.settings.rateLabor || 12.5;
+            state.settings.rateHealth = state.settings.rateHealth || 5.17;
+            state.settings.ratePension = state.settings.ratePension || 6;
+            state.settings.leaveFact = state.settings.leaveFact != null ? state.settings.leaveFact : 1;
+            state.settings.leaveSick = state.settings.leaveSick != null ? state.settings.leaveSick : 0.5;
+            state.settings.leaveSpecial = state.settings.leaveSpecial != null ? state.settings.leaveSpecial : 0;
+            state.settings.fixedAllowances = Array.isArray(state.settings.fixedAllowances) ? state.settings.fixedAllowances : [];
+            state.settings.healthFamilyCoeff = state.settings.healthFamilyCoeff || 1.56;
+            // 相容舊的 laborInsuranceLevels/healthInsuranceLevels 格式，轉換到新的 insuranceLevels 結構
+            if (!state.settings.insuranceLevels) {
+                const oldLabor = state.settings.laborInsuranceLevels || [24000, 30300, 36300, 45800];
+                const oldHealth = state.settings.healthInsuranceLevels || [24000, 30300, 36300, 45800];
+                const currentYear = new Date().getFullYear();
+                state.settings.insuranceLevels = {
+                    [currentYear]: { labor: oldLabor, health: oldHealth }
+                };
+            }
+
+            // install formatting helpers for settings
+            attachSettingsInputHandlers();
+
+            updateSettingsFromUI();
+            renderAll();
+        };
+
+        function saveData() {
+            localStorage.setItem('payroll_system_db', JSON.stringify(state));
+        }
+
+        function updateSettingsFromUI() {
+            // only update values tied to inputs; fixed allowances handled separately
+            state.settings.rateLabor = parseFloat(document.getElementById('rateLabor')?.value || 0);
+            state.settings.rateHealth = parseFloat(document.getElementById('rateHealth')?.value || 0);
+            state.settings.ratePension = parseFloat(document.getElementById('ratePension')?.value || 0);
+            state.settings.leaveFact = parseFloat(document.getElementById('leaveFact')?.value || 1);
+            state.settings.leaveSick = parseFloat(document.getElementById('leaveSick')?.value || 0.5);
+            state.settings.leaveSpecial = parseFloat(document.getElementById('leaveSpecial')?.value || 0);
+            // enforce two‑decimal display and rounding
+            if (!isNaN(state.settings.rateLabor)) {
+                state.settings.rateLabor = parseFloat(state.settings.rateLabor.toFixed(2));
+            }
+            if (!isNaN(state.settings.rateHealth)) {
+                state.settings.rateHealth = parseFloat(state.settings.rateHealth.toFixed(2));
+            }
+            if (!isNaN(state.settings.ratePension)) {
+                state.settings.ratePension = parseFloat(state.settings.ratePension.toFixed(1));
+            }
+        }
+
+        // --- Settings Helpers ---
+        function saveSettings() {
+            updateSettingsFromUI();
+            saveData();
+            const display = document.getElementById('labRateDisplay');
+            if (display) display.innerText = state.settings.rateLabor.toFixed(2);
+            alert('設定已儲存');
+        }
+
+        // --- Fixed Allowances Management ---
+        function renderFixedAllowances() {
+            const container = document.getElementById('fixedAllowancesContainer');
+            if (!container) return;
+            const list = Array.isArray(state.settings.fixedAllowances) ? state.settings.fixedAllowances : [];
+            // header row so operator knows column mapping
+            const header = `
+                <div class="flex gap-2 items-center font-semibold border-b pb-2 mb-2">
+                    <div class="flex-1">名稱</div>
+                    <div class="w-24">每日金額</div>
+                    <div class="w-16">操作</div>
+                </div>`;
+            const items = list.map((f, i) => `
+                <div class="flex gap-2 items-center">
+                    <input type="text" value="${f.name}" placeholder="名稱" 
+                           onchange="updateFixedAllowance(${i}, 'name', this.value)" class="flex-1 border p-1" />
+                    <input type="number" value="${f.amountPerDay}" placeholder="每日金額" 
+                           onchange="updateFixedAllowance(${i}, 'amountPerDay', this.value)" class="w-24 border p-1" />
+                    <button onclick="removeFixedAllowance(${i})" class="text-red-500">刪除</button>
+                </div>
+            `).join('');
+            container.innerHTML = header + items;
+        }
+
+        function addFixedAllowance() {
+            state.settings.fixedAllowances = state.settings.fixedAllowances || [];
+            state.settings.fixedAllowances.push({ name: '', amountPerDay: 0 });
+            renderFixedAllowances();
+            saveData();
+            renderPayrollList();
+        }
+
+        function updateFixedAllowance(idx, field, value) {
+            state.settings.fixedAllowances = state.settings.fixedAllowances || [];
+            if (!state.settings.fixedAllowances[idx]) return;
+            if (field === 'amountPerDay') {
+                state.settings.fixedAllowances[idx][field] = parseFloat(value) || 0;
+            } else {
+                state.settings.fixedAllowances[idx][field] = value;
+            }
+            saveData();
+            renderPayrollList();
+        }
+
+        function removeFixedAllowance(idx) {
+            if (!Array.isArray(state.settings.fixedAllowances)) return;
+            state.settings.fixedAllowances.splice(idx, 1);
+            renderFixedAllowances();
+            saveData();
+            renderPayrollList();
+        }
+
+        // --- Insurance Levels & Parameters Management ---
+        function renderInsuranceYearOptions() {
+            // 显示所有已有年度的下拉选项
+            const select = document.getElementById('insuranceYearSelect');
+            if (!select) return;
+            const years = Object.keys(state.settings.insuranceLevels || {}).sort().reverse();
+            const currentYear = new Date().getFullYear();
+            select.innerHTML = '<option value="">-- 請選擇年度 --</option>' + 
+                years.map(y => `<option value="${y}">${y}年</option>`).join('');
+            // 預設選擇當前年度
+            if (years.includes(String(currentYear))) {
+                select.value = currentYear;
+            }
+        }
+
+        function renderInsuranceLevelsByYear() {
+            const select = document.getElementById('insuranceYearSelect');
+            const container = document.getElementById('insuranceLevelEditorContainer');
+            if (!select || !container) return;
+            const year = parseInt(select.value);
+            if (isNaN(year)) {
+                container.innerHTML = '<p class="text-gray-500">請先選擇年度</p>';
+                return;
+            }
+            const levels = state.settings.insuranceLevels[year] || { labor: [], health: [] };
+            if (!levels.labor) levels.labor = [];
+            if (!levels.health) levels.health = [];
+            
+            const renderTypeSection = (type, title) => {
+                const items = levels[type] || [];
+                return `
+                    <div>
+                        <h3 class="font-medium mb-3">${title}</h3>
+                        <div class="space-y-2 mb-3" id="${type}LevelsContainer">
+                            ${items.map((lvl, i) => `
+                                <div class="flex gap-2 items-center">
+                                    <input type="number" value="${lvl}" placeholder="級距金額"
+                                           onchange="updateInsuranceLevel(${year}, '${type}', ${i}, this.value)" 
+                                           class="flex-1 border p-1 text-sm" />
+                                    <button onclick="deleteInsuranceLevel(${year}, '${type}', ${i})" 
+                                            class="text-red-500 text-sm hover:underline">刪除</button>
+                                </div>
+                            `).join('')}
+                        </div>
+                        <button onclick="addInsuranceLevelItem(${year}, '${type}')" 
+                                class="bg-indigo-600 text-white px-3 py-1 rounded text-sm hover:bg-indigo-700 w-full">
+                            + 新增${title}級距
+                        </button>
+                    </div>
+                `;
+            };
+            
+            container.innerHTML = renderTypeSection('labor', '勞保級距') + 
+                `<div class="flex justify-center py-4">
+                    <button onclick="copyLaborToHealth(${year})" 
+                            class="bg-green-600 text-white px-4 py-2 rounded hover:bg-green-700 text-sm">
+                        複製勞保級距到健保 ▼
+                    </button>
+                </div>` + 
+                renderTypeSection('health', '健保級距');
+        }
+
+        function updateInsuranceLevel(year, type, idx, value) {
+            if (!state.settings.insuranceLevels[year]) return;
+            if (!state.settings.insuranceLevels[year][type]) return;
+            state.settings.insuranceLevels[year][type][idx] = parseInt(value) || 0;
+            saveData();
+        }
+
+        function deleteInsuranceLevel(year, type, idx) {
+            if (!state.settings.insuranceLevels[year]) return;
+            if (!state.settings.insuranceLevels[year][type]) return;
+            if (confirm('確定要刪除此級距？')) {
+                state.settings.insuranceLevels[year][type].splice(idx, 1);
+                saveData();
+                renderInsuranceLevelsByYear();
+            }
+        }
+
+        function addInsuranceLevelItem(year, type) {
+            if (!state.settings.insuranceLevels[year]) return;
+            if (!state.settings.insuranceLevels[year][type]) {
+                state.settings.insuranceLevels[year][type] = [];
+            }
+            state.settings.insuranceLevels[year][type].push(0);
+            saveData();
+            renderInsuranceLevelsByYear();
+        }
+
+        function addInsuranceYear() {
+            const yearInput = document.getElementById('newInsuranceYear');
+            const year = parseInt(yearInput.value);
+            if (isNaN(year) || year < 2020 || year > 2050) {
+                return alert('請輸入有效的年份（2020-2050）');
+            }
+            if (state.settings.insuranceLevels[year]) {
+                return alert('此年度已存在');
+            }
+            // 複製前一年度的級距作為預設
+            const prevYear = year - 1;
+            const prevLevels = state.settings.insuranceLevels[prevYear];
+            state.settings.insuranceLevels[year] = prevLevels ? 
+                { labor: [...(prevLevels.labor || [])], health: [...(prevLevels.health || [])] } :
+                { labor: [24000, 30300, 36300, 45800], health: [24000, 30300, 36300, 45800] };
+            saveData();
+            renderInsuranceYearOptions();
+            document.getElementById('insuranceYearSelect').value = year;
+            renderInsuranceLevelsByYear();
+            yearInput.value = '';
+        }
+
+        function copyLaborToHealth(year) {
+            if (!state.settings.insuranceLevels[year]) return;
+            const laborLevels = state.settings.insuranceLevels[year].labor || [];
+            if (laborLevels.length === 0) {
+                return alert('勞保級距為空，無法複製');
+            }
+            // 複製勞保級距到健保級距
+            state.settings.insuranceLevels[year].health = [...laborLevels];
+            saveData();
+            renderInsuranceLevelsByYear();
+            alert(`已將 ${year} 年勞保級距複製到健保級距`);
+        }
+
+        function saveInsuranceParams() {
+            // 更新健保眷口係數
+            state.settings.healthFamilyCoeff = parseFloat(document.getElementById('healthFamilyCoeff')?.value) || 1.56;
+            saveData();
+            alert('投保級距與健保參數已儲存');
+            renderPayrollList();  // 重新計算薪資
+        }
+
+        // --- Workdays Management ---
+        function setWorkdays(empId, days) {
+            state.workdays[empId] = parseFloat(days) || 0;
+            saveData();
+        }
+        function getWorkdays(empId) {
+            return state.workdays[empId] || 0;
+        }
+
+        function setLeaveData(empId, type, days) {
+            if (!state.leaveHistory[empId]) state.leaveHistory[empId] = { 事: 0, 病: 0, 特: 0 };
+            state.leaveHistory[empId][type] = parseFloat(days) || 0;
+            saveData();
+        }
+
+        function showSection(id) {
+            console.log('switching to section', id);
+            document.querySelectorAll('.section-content').forEach(s => s.classList.add('hidden'));
+            document.querySelectorAll('nav button').forEach(b => b.classList.remove('tab-active'));
+            const sec = document.getElementById(`sec-${id}`);
+            if (sec) sec.classList.remove('hidden');
+            const tab = document.getElementById(`tab-${id}`);
+            if (tab) tab.classList.add('tab-active');
+            if (id === 'settings') {
+                document.getElementById('rateLabor').value = state.settings.rateLabor.toFixed(2);
+                document.getElementById('rateHealth').value = state.settings.rateHealth.toFixed(2);
+                document.getElementById('ratePension').value = state.settings.ratePension.toFixed(1);
+                document.getElementById('leaveFact').value = state.settings.leaveFact;
+                document.getElementById('leaveSick').value = state.settings.leaveSick;
+                document.getElementById('leaveSpecial').value = state.settings.leaveSpecial;
+                document.getElementById('healthFamilyCoeff').value = (state.settings.healthFamilyCoeff || 1.56).toFixed(2);
+                const display = document.getElementById('labRateDisplay');
+                if (display) display.innerText = state.settings.rateLabor.toFixed(2);
+                renderFixedAllowances();
+                renderInsuranceYearOptions();
+                renderInsuranceLevelsByYear();
+                renderBankList();
+            }
+            renderAll();
+        }
+
+        // --- Employee Management ---
+        function openAddEmployeeModal() {
+            currentEditingEmpId = null;
+            currentSalaryHistory = [];
+            document.getElementById('empName').value = '';
+            document.getElementById('empBaseSalary').value = '30000';
+            document.getElementById('empLaborLevel').value = '30300';
+            document.getElementById('empHealthLevel').value = '30300';
+            document.getElementById('empPensionRate').value = '0';
+            document.getElementById('empAnnualSpecial').value = '0';
+            document.getElementById('empCode').value = '';
+            document.getElementById('empAccountNumber').value = '';
+            document.getElementById('empAccountHolder').value = '';
+                document.getElementById('empBankCode').value = '';
+                document.getElementById('empStatus').value = '在職';
+                document.getElementById('empStartDate').value = '';
+                document.getElementById('empEndDate').value = '';
+                populateBankOptions();
+            document.getElementById('employeeModal').classList.remove('hidden');
+        }
+
+        function closeEmployeeModal() {
+            document.getElementById('employeeModal').classList.add('hidden');
+        }
+
+        function saveEmployeeModal() {
+            const name = document.getElementById('empName').value.trim();
+            if (!name) return alert("請輸入員工姓名");
+
+            const empData = {
+                name,
+                employeeCode: document.getElementById('empCode').value.trim(),
+                baseSalary: parseFloat(document.getElementById('empBaseSalary').value),
+                laborLevel: parseFloat(document.getElementById('empLaborLevel').value),
+                healthLevel: parseFloat(document.getElementById('empHealthLevel').value),
+                pensionSelfRate: parseFloat(document.getElementById('empPensionRate').value),
+                annualSpecialDays: parseFloat(document.getElementById('empAnnualSpecial').value),
+                accountNumber: document.getElementById('empAccountNumber').value.trim(),
+                accountHolder: document.getElementById('empAccountHolder').value.trim(),
+                         bankIdx: parseInt(document.getElementById('empBankName').value) || -1,
+                     bankCode: document.getElementById('empBankCode').value.trim(),
+                         branchName: document.getElementById('empBranchName').value,
+                         status: document.getElementById('empStatus').value || '在職',
+                         startDate: document.getElementById('empStartDate').value || '',
+                         endDate: document.getElementById('empEndDate').value || '',
+                         salaryHistory: currentSalaryHistory || []
+            };
+
+            if (currentEditingEmpId) {
+                const emp = state.employees.find(e => e.id === currentEditingEmpId);
+                if (emp) Object.assign(emp, empData);
+            } else {
+                const newEmpId = Date.now();
+                state.employees.push({
+                    id: newEmpId,
+                    ...empData
+                });
+                state.bonusItems[newEmpId] = [];
+                state.leaveHistory[newEmpId] = { 事: 0, 病: 0, 特: 0 };
+            }
+
+            saveData();
+            closeEmployeeModal();
+            renderAll();
+        }
+
+        function editEmployee(id) {
+            const emp = state.employees.find(e => e.id === id);
+            if (!emp) return;
+            currentEditingEmpId = id;
+            document.getElementById('empName').value = emp.name;
+            document.getElementById('empBaseSalary').value = emp.baseSalary;
+            document.getElementById('empLaborLevel').value = emp.laborLevel;
+            document.getElementById('empHealthLevel').value = emp.healthLevel;
+            document.getElementById('empPensionRate').value = emp.pensionSelfRate || 0;
+            document.getElementById('empAnnualSpecial').value = emp.annualSpecialDays || 0;
+            document.getElementById('empCode').value = emp.employeeCode || '';
+            document.getElementById('empAccountNumber').value = emp.accountNumber || '';
+            document.getElementById('empAccountHolder').value = emp.accountHolder || '';
+            document.getElementById('empBankCode').value = emp.bankCode || '';
+                document.getElementById('empStatus').value = emp.status || '在職';
+                document.getElementById('empStartDate').value = emp.startDate || '';
+                document.getElementById('empEndDate').value = emp.endDate || '';
+                populateBankOptions(emp);
+            currentSalaryHistory = emp.salaryHistory ? [...emp.salaryHistory] : [];
+            document.getElementById('employeeModal').classList.remove('hidden');
+            renderSalaryHistory();
+            renderEmployeeRecords();
+        }
+
+        function deleteEmployee(id) {
+            if (confirm("確定要刪除此員工？此動作無法復原。")) {
+                state.employees = state.employees.filter(e => e.id !== id);
+                delete state.bonusItems[id];
+                delete state.leaveHistory[id];
+                saveData();
+                renderAll();
+            }
+        }
+
+        // --- Bonus Items Management ---
+        function openBonusModal(empId) {
+            const emp = state.employees.find(e => e.id === empId);
+            if (!emp) return;
+            currentBonusEmpId = empId;
+            document.getElementById('bonusModalTitle').innerText = `${emp.name} - 加班費/獎金/津貼`;
+            renderBonusItems();
+            document.getElementById('bonusModal').classList.remove('hidden');
+        }
+
+        function closeBonusModal() {
+            document.getElementById('bonusModal').classList.add('hidden');
+        }
+
+        function renderBonusItems() {
+            const items = state.bonusItems[currentBonusEmpId] || [];
+            const container = document.getElementById('bonusItemsContainer');
+            container.innerHTML = items.map((item, idx) => `
+                <div class="bonus-item">
+                    <input type="text" placeholder="項目名稱 (如: 加班費、績效獎)" value="${item.name}" 
+                           onchange="updateBonusItem(${idx}, 'name', this.value)">
+                    <input type="number" placeholder="金額" value="${item.amount}" min="0" step="100"
+                           style="width: 120px;" onchange="updateBonusItem(${idx}, 'amount', this.value)">
+                    <button onclick="removeBonusItem(${idx})" class="bg-red-500 text-white px-2 py-1 rounded hover:bg-red-600">刪除</button>
+                </div>
+            `).join('');
+        }
+
+        function addBonusItem() {
+            if (!state.bonusItems[currentBonusEmpId]) {
+                state.bonusItems[currentBonusEmpId] = [];
+            }
+            state.bonusItems[currentBonusEmpId].push({ name: '', amount: 0 });
+            renderBonusItems();
+        }
+
+        function updateBonusItem(idx, field, value) {
+            if (field === 'amount') {
+                state.bonusItems[currentBonusEmpId][idx].amount = parseFloat(value) || 0;
+            } else {
+                state.bonusItems[currentBonusEmpId][idx].name = value;
+            }
+        }
+
+        function removeBonusItem(idx) {
+            state.bonusItems[currentBonusEmpId].splice(idx, 1);
+            renderBonusItems();
+        }
+
+        function saveBonusItems() {
+            saveData();
+            closeBonusModal();
+            renderPayrollList();
+        }
+
+        function getTotalBonus(empId) {
+            const items = state.bonusItems[empId] || [];
+            return items.reduce((sum, item) => sum + (item.amount || 0), 0);
+        }
+
+        function getBonusDetails(empId) {
+            const items = state.bonusItems[empId] || [];
+            return items.map(item => `${item.name}:${item.amount}`).join('\n');
+        }
+
+        // --- Leave Management ---
+        function getLeaveData(empId) {
+            return state.leaveHistory[empId] || { 事: 0, 病: 0, 特: 0 };
+        }
+
+        function getSpecialLeavesUsed(empId) {
+            // 計算特假已使用天數 (從記錄中統計)
+            const empRecords = state.records.filter(r => r.empId === empId);
+            return empRecords.reduce((sum, r) => {
+                const specialDays = (r.leaveDays && r.leaveDays.特) ? r.leaveDays.特 : 0;
+                return sum + specialDays;
+            }, 0);
+        }
+
+        function getSpecialLeavesRemaining(empId) {
+            const emp = state.employees.find(e => e.id === empId);
+            if (!emp) return 0;
+            const used = getSpecialLeavesUsed(empId);
+            return Math.max(0, emp.annualSpecialDays - used);
+        }
+
+        // --- Bank & Account Management ---
+        function renderBankList() {
+            const container = document.getElementById('bankListContainer');
+            if (!container) return;
+            const banks = Array.isArray(state.settings.commonBanks) ? state.settings.commonBanks : [];
+            if (banks.length === 0) {
+                container.innerHTML = '<div class="text-slate-500 text-sm">尚無常用銀行</div>';
+                return;
+            }
+            const html = banks.map((b, i) => `
+                <div class="flex gap-2 items-center p-2 border rounded bg-slate-50">
+                    <div class="flex-1">
+                        <div class="text-sm font-medium">${b.name} (${b.code})</div>
+                           <div class="text-xs text-slate-600">${Array.isArray(b.branches) ? b.branches.join(' / ') : b.branch || '總行'}</div>
+                    </div>
+                    <button onclick="removeBank(${i})" class="text-red-500 text-sm">刪除</button>
+                </div>
+            `).join('');
+            container.innerHTML = html;
+        }
+
+        function addBank() {
+            const bankName = prompt('銀行名稱:');
+            if (!bankName) return;
+            const bankCode = prompt('銀行代號 (3碼):');
+            if (!bankCode) return;
+               const branchesStr = prompt('分行名稱 (多個用逗號分隔，如: 台中分行, 南投分行):') || '總行';
+               const branches = branchesStr.split(',').map(b => b.trim()).filter(b => b);
+           
+               state.settings.commonBanks = state.settings.commonBanks || [];
+               state.settings.commonBanks.push({ name: bankName, code: bankCode, branches: branches || ['總行'] });
+            saveData();
+            renderBankList();
+        }
+
+        function removeBank(idx) {
+            if (confirm('確定刪除此銀行？')) {
+                state.settings.commonBanks.splice(idx, 1);
+                saveData();
+                renderBankList();
+            }
+        }
+
+        function populateBankOptions(emp) {
+            const select = document.getElementById('empBankName');
+            const branchSelect = document.getElementById('empBranchName');
+            const banks = state.settings.commonBanks || [];
+            
+            select.innerHTML = '<option value="">請選擇銀行</option>' + 
+                banks.map((b, idx) => `<option value="${idx}">${b.name}</option>`).join('');
+            
+            // 如果編輯員工，設置已選擇的銀行
+            if (emp && emp.bankIdx >= 0) {
+                select.value = emp.bankIdx;
+                onBankSelected(emp);
+            } else {
+                branchSelect.innerHTML = '<option value="">請先選擇銀行</option>';
+                branchSelect.disabled = true;
+            }
+        }
+
+        function onBankSelected(emp) {
+            const bankSelect = document.getElementById('empBankName');
+            const branchSelect = document.getElementById('empBranchName');
+            if (!bankSelect || !branchSelect) return;
+        
+            const bankIdx = parseInt(bankSelect.value);
+            const banks = state.settings.commonBanks || [];
+        
+            if (isNaN(bankIdx) || !banks[bankIdx]) {
+                branchSelect.innerHTML = '<option value="">請先選擇銀行</option>';
+                branchSelect.disabled = true;
+                return;
+            }
+        
+            const bank = banks[bankIdx];
+            const branches = Array.isArray(bank.branches) ? bank.branches : [bank.branch || '總行'];
+            branchSelect.innerHTML = '<option value="">請選擇分行</option>' + 
+                branches.map(br => `<option value="${br}">${br}</option>`).join('');
+            branchSelect.disabled = false;
+            // 如果編輯員工且有已保存的分行名稱，自動選擇
+            if (emp && emp.branchName && branches.includes(emp.branchName)) {
+                branchSelect.value = emp.branchName;
+            }
+        }
+
+        // --- Salary Adjustment Management ---
+        function renderSalaryHistory() {
+            const container = document.getElementById('salaryHistoryContainer');
+            if (!container) return;
+            const history = currentSalaryHistory || [];
+            if (history.length === 0) {
+                container.innerHTML = '<p class="text-gray-500 text-sm">尚無調薪記錄</p>';
+                return;
+            }
+            container.innerHTML = history.map((item, index) => `
+                <div class="flex items-center gap-2 p-2 bg-gray-50 rounded">
+                    <span class="text-sm font-medium w-24">${item.date}</span>
+                    <span class="text-sm w-20">${item.amount.toLocaleString()}</span>
+                    <span class="text-sm flex-1">${item.note || ''}</span>
+                    <button onclick="deleteSalaryAdjustment(${index})" class="text-red-500 text-sm hover:underline">刪除</button>
+                </div>
+            `).join('');
+        }
+
+        function addSalaryAdjustment() {
+            const date = document.getElementById('salaryAdjustDate').value;
+            const amount = parseFloat(document.getElementById('salaryAdjustAmount').value);
+            const note = document.getElementById('salaryAdjustNote').value.trim();
+
+            if (!date) return alert('請選擇調薪日期');
+            if (isNaN(amount) || amount <= 0) return alert('請輸入有效的調薪金額');
+
+            currentSalaryHistory.push({
+                date: date,
+                amount: amount,
+                note: note
+            });
+
+            // 排序調薪記錄按日期
+            currentSalaryHistory.sort((a, b) => new Date(a.date) - new Date(b.date));
+
+            // 清空輸入框
+            document.getElementById('salaryAdjustDate').value = '';
+            document.getElementById('salaryAdjustAmount').value = '';
+            document.getElementById('salaryAdjustNote').value = '';
+
+            renderSalaryHistory();
+        }
+
+        function deleteSalaryAdjustment(index) {
+            if (confirm('確定要刪除此調薪記錄？')) {
+                currentSalaryHistory.splice(index, 1);
+                renderSalaryHistory();
+            }
+        }
+
+        function renderEmployeeRecords() {
+            const container = document.getElementById('empRecordContainer');
+            if (!container || !currentEditingEmpId) return;
+            const empRecords = state.records.filter(r => r.empId === currentEditingEmpId);
+            if (empRecords.length === 0) {
+                container.innerHTML = '<div class="text-slate-500 text-sm">此員工尚無薪資紀錄</div>';
+                return;
+            }
+            const html = empRecords.map(r => `
+                <div class="mb-2 p-2 border rounded bg-slate-50 text-xs">
+                    <div class="font-medium">${r.month} - 實發: $ ${Math.round(r.net).toLocaleString()}</div>
+                    <div class="text-slate-600">應發: $ ${Math.round(r.gross).toLocaleString()} | 出勤: ${r.workdays}天 | ${r.note || '無備註'}</div>
+                </div>
+            `).join('');
+            container.innerHTML = html;
+        }
+
+        function clearRecordFilters() {
+            document.getElementById('recordsFilterMonth').value = '';
+            document.getElementById('recordsFilterName').value = '';
+            document.getElementById('recordsFilterNote').value = '';
+            renderRecords();
+        }
+
+        // --- Payroll Calculation Logic ---
+        
+        // 獲取指定日期的薪資金額（考慮調薪歷史）
+        function getSalaryForDate(emp, dateStr) {
+            if (!emp.salaryHistory || emp.salaryHistory.length === 0) {
+                return emp.baseSalary;
+            }
+            
+            // 將調薪記錄按日期排序（最新的在前）
+            const sortedHistory = [...emp.salaryHistory].sort((a, b) => new Date(b.date) - new Date(a.date));
+            
+            // 找到適用於指定日期的薪資金額
+            for (const adjustment of sortedHistory) {
+                if (new Date(adjustment.date) <= new Date(dateStr)) {
+                    return adjustment.amount;
+                }
+            }
+            
+            // 如果沒有找到適用的調薪，返回基本薪資
+            return emp.baseSalary;
+        }
+        
+        function calculatePayrollRow(emp, payMonth = null) {
+            // 如果沒有指定月份，使用當前選擇的月份
+            if (!payMonth) {
+                payMonth = document.getElementById('payMonth')?.value;
+            }
+            
+            // 獲取適用於該月份的薪資金額
+            const applicableSalary = getSalaryForDate(emp, payMonth ? payMonth + '-01' : new Date().toISOString().split('T')[0]);
+            const daily = applicableSalary / 30;
+            let bonus = getTotalBonus(emp.id);
+            const leave = getLeaveData(emp.id);
+            const lvF = leave.事 || 0;
+            const lvS = leave.病 || 0;
+            const lvSp = leave.特 || 0;
+
+            // 工作天數與固定津貼
+            const days = getWorkdays(emp.id);
+            let fixedTotal = 0;
+            state.settings.fixedAllowances.forEach(f => {
+                fixedTotal += (f.amountPerDay || 0) * days;
+            });
+            if (fixedTotal) {
+                bonus += fixedTotal;
+            }
+
+            // 請假扣薪邏輯
+            const deductFact = lvF * daily * (parseInt(state.settings.leaveFact) || 1);
+            const deductSick = lvS * daily * (parseInt(state.settings.leaveSick) || 0.5);
+            const deductSpecial = lvSp * daily * (parseInt(state.settings.leaveSpecial) || 0);
+            const deductLeave = deductFact + deductSick + deductSpecial;
+
+            // 勞健保自付額（雙需與工稿、報告一致）
+            const laborSelf = Math.round(emp.laborLevel * (state.settings.rateLabor / 100) * 0.2);
+            // 健保自付：投保薪資 × 5.17% × 30% × 眉口數係數
+            const healthCoeff = state.settings.healthFamilyCoeff || 1.56;
+            const healthSelf = Math.round(emp.healthLevel * (state.settings.rateHealth / 100) * 0.3 * healthCoeff);
+            // 勞退自提（從薪購扣）× 兕位應提繳比例（率先為0-6%）
+            const pensionSelf = Math.round(applicableSalary * (emp.pensionSelfRate / 100));
+
+            const gross = applicableSalary + bonus - deductLeave;
+            const net = gross - laborSelf - healthSelf - pensionSelf;
+
+            return { 
+                gross, 
+                net, 
+                laborSelf, 
+                healthSelf, 
+                pensionSelf,
+                bonus,
+                deductLeave,
+                fixedAllowances: fixedTotal
+            };
+        }
+
+        // --- Rendering ---
+        function renderAll() {
+            try {
+                const empBody = document.getElementById('employeeBody');
+                if (empBody) renderEmployees();
+                
+                const payBody = document.getElementById('payrollBody');
+                if (payBody) renderPayrollList();
+                
+                const recBody = document.getElementById('recordsBody');
+                if (recBody) renderRecords();
+                
+                // bill list shown in reports
+                const reportBillContainer = document.getElementById('reportBillList');
+                if (reportBillContainer) renderBills();
+                // if editing an employee, render their salary history too
+                if (currentEditingEmpId) renderEmployeeRecords();
+            } catch (err) {
+                console.error('Render error:', err);
+            }
+        }
+
+        function renderEmployees() {
+            const body = document.getElementById('employeeBody');
+            if (!body) return;
+            body.innerHTML = state.employees.map(emp => {
+                const remain = getSpecialLeavesRemaining(emp.id);
+                const used = getSpecialLeavesUsed(emp.id);
+                const bankName = (emp.bankIdx >= 0 && state.settings.commonBanks && state.settings.commonBanks[emp.bankIdx]) ? state.settings.commonBanks[emp.bankIdx].name : (emp.bankName || '-');
+                const currentSalary = getSalaryForDate(emp, document.getElementById('payMonth')?.value ? document.getElementById('payMonth').value + '-01' : new Date().toISOString().split('T')[0]);
+                return `<tr>
+                    <td class="font-medium">${emp.name}</td>
+                    <td>${currentSalary.toLocaleString()}</td>
+                    <td>${emp.laborLevel.toLocaleString()}</td>
+                    <td>${emp.healthLevel.toLocaleString()}</td>
+                    <td>${emp.pensionSelfRate || 0} %</td>
+                    <td class="text-center font-medium">${emp.annualSpecialDays || 0}</td>
+                    <td class="text-center">${used}</td>
+                    <td class="text-center text-blue-600 font-bold">${remain}</td>
+                    <td>${emp.status || '-'}</td>
+                    <td>${emp.startDate || '-'}</td>
+                    <td>${emp.endDate || '-'}</td>
+                    <td>${bankName}</td>
+                    <td>${emp.accountNumber || '-'}</td>
+                    <td>
+                        <button onclick="editEmployee(${emp.id})" class="text-blue-500 hover:underline mr-2">編輯</button>
+                        <button onclick="deleteEmployee(${emp.id})" class="text-red-500 hover:underline">刪除</button>
+                    </td>
+                </tr>`;
+            }).join('');
+        }
+
+        function renderPayrollList() {
+            try {
+                const body = document.getElementById('payrollBody');
+                if (!body) return;
+                const emps = Array.isArray(state.employees) ? state.employees : [];
+                if (emps.length === 0) {
+                    body.innerHTML = `<tr><td colspan="10" class="text-center text-slate-500">尚無員工資料，請先至「員工基本資料」新增</td></tr>`;
+                    return;
+                }
+                body.innerHTML = emps.map(emp => {
+                const calc = calculatePayrollRow(emp, document.getElementById('payMonth')?.value); // calc.fixedAllowances added
+                const remain = getSpecialLeavesRemaining(emp.id);
+                const leave = getLeaveData(emp.id);
+                const bonusDetails = getBonusDetails(emp.id);
+                const days = getWorkdays(emp.id);
+
+                return `<tr id="row-${emp.id}">
+                    <td><input type="number" id="workdays-${emp.id}" value="${days}" min="0" class="w-16 text-center text-xs" onchange="setWorkdays(${emp.id}, this.value); refreshPayrollRow(${emp.id})"></td>
+                    <td class="font-medium">${emp.name}</td>
+                    <td>${emp.baseSalary.toLocaleString()}</td>
+                    <td>
+                        <button onclick="openBonusModal(${emp.id})" class="text-blue-600 hover:underline px-2 py-1 bg-blue-50 rounded text-sm w-full text-left">
+                            ${calc.bonus > 0 ? '$ ' + calc.bonus.toLocaleString() : '新增...'}
+                        </button>
+                        ${bonusDetails ? `<div class="text-xs text-slate-500 mt-1 whitespace-pre-wrap">${bonusDetails}</div>` : ''}
+                        ${calc.fixedAllowances ? `<div class="text-xs text-slate-400 mt-1">固定津貼: $${Math.round(calc.fixedAllowances).toLocaleString()}</div>` : ''}
+                    </td>
+                    <td>
+                        <div class="space-y-1">
+                            <div class="flex gap-1 items-center">
+                                <label class="text-xs w-6">事:</label>
+                                <input type="number" id="lvF-${emp.id}" value="${leave.事 || 0}" min="0" step="0.5" class="w-14 text-center text-xs" 
+                                       onchange="setLeaveData(${emp.id}, '事', this.value); refreshPayrollRow(${emp.id})">
+                                <span class="text-xs text-slate-400">天</span>
+                            </div>
+                            <div class="flex gap-1 items-center">
+                                <label class="text-xs w-6">病:</label>
+                                <input type="number" id="lvS-${emp.id}" value="${leave.病 || 0}" min="0" step="0.5" class="w-14 text-center text-xs"
+                                       onchange="setLeaveData(${emp.id}, '病', this.value); refreshPayrollRow(${emp.id})">
+                                <span class="text-xs text-slate-400">天</span>
+                            </div>
+                            <div class="flex gap-1 items-center">
+                                <label class="text-xs w-6">特:</label>
+                                <input type="number" id="lvSp-${emp.id}" value="${leave.特 || 0}" min="0" max="${remain}" step="0.5" class="w-14 text-center text-xs"
+                                       onchange="setLeaveData(${emp.id}, '特', this.value); refreshPayrollRow(${emp.id})">
+                                <span class="text-xs text-slate-400">天</span>
+                            </div>
+                        </div>
+                    </td>
+                    <td class="text-center text-blue-600 font-bold">${remain} 天</td>
+                    <td class="text-xs text-slate-600">
+                        <div class="flex flex-col gap-1">
+                            <div class="flex items-center gap-1">
+                                <label class="text-xs w-8">勞保</label>
+                                <input type="number" id="deductLabor-${emp.id}" class="w-16 text-xs text-center" value="${calc.laborSelf}" min="0" step="1" onchange="refreshPayrollRow(${emp.id})">
+                            </div>
+                            <div class="flex items-center gap-1">
+                                <label class="text-xs w-8">健保</label>
+                                <input type="number" id="deductHealth-${emp.id}" class="w-16 text-xs text-center" value="${calc.healthSelf}" min="0" step="1" onchange="refreshPayrollRow(${emp.id})">
+                            </div>
+                            ${calc.pensionSelf > 0 ? `<div class="flex items-center gap-1"><label class="text-xs w-8">勞退</label> ${calc.pensionSelf}</div>` : ''}
+                        </div>
+                    </td>
+                    <td class="font-medium text-slate-700" id="gross-${emp.id}">
+                        $ ${Math.round(calc.gross).toLocaleString()}
+                    </td>
+                    <td class="font-bold text-blue-700 text-lg" id="net-${emp.id}">
+                        $ ${Math.round(calc.net).toLocaleString()}
+                    </td>
+                    <td>
+                        <input type="text" id="note-${emp.id}" placeholder="備註" class="w-16 text-xs">
+                    </td>
+                </tr>`;
+            }).join('');
+        } catch (err) {
+            console.error('Error rendering payroll list', err);
+        }
+        }
+
+        function refreshPayrollRow(empId) {
+            const emp = state.employees.find(e => e.id === empId);
+            const calc = calculatePayrollRow(emp, document.getElementById('payMonth')?.value);
+            // read manual deductions if any
+            const manualLabor = parseFloat(document.getElementById(`deductLabor-${empId}`)?.value) || calc.laborSelf;
+            const manualHealth = parseFloat(document.getElementById(`deductHealth-${empId}`)?.value) || calc.healthSelf;
+            const pensionSelf = calc.pensionSelf;
+            const gross = calc.gross;
+            const net = gross - manualLabor - manualHealth - pensionSelf;
+            document.getElementById(`gross-${empId}`).innerText = `$ ${Math.round(gross).toLocaleString()}`;
+            document.getElementById(`net-${empId}`).innerText = `$ ${Math.round(net).toLocaleString()}`;
+        }
+
+        function saveMonthlyPayroll() {
+            updateSettingsFromUI();
+            const month = document.getElementById('payMonth').value;
+            const payDate = document.getElementById('payDate').value;
+            if (!month || !payDate) return alert("請選擇月份與發薪日");
+
+            state.employees.forEach(emp => {
+                const leave = getLeaveData(emp.id);
+                const note = document.getElementById(`note-${emp.id}`).value;
+                const calc = calculatePayrollRow(emp, month);
+                const applicableSalary = getSalaryForDate(emp, month + '-01');
+                const days = getWorkdays(emp.id);
+                // get manual deduction values if user edited them
+                const manualLabor = parseFloat(document.getElementById(`deductLabor-${emp.id}`)?.value) || calc.laborSelf;
+                const manualHealth = parseFloat(document.getElementById(`deductHealth-${emp.id}`)?.value) || calc.healthSelf;
+
+                state.records.push({
+                    id: Date.now() + Math.random(),
+                    month,
+                    payDate,
+                    empId: emp.id,
+                    empName: emp.name,
+                    baseSalary: applicableSalary,
+                    workdays: days,
+                    mealExpense: 0,
+                    transportExpense: 0,
+                    fixedAllowances: state.settings.fixedAllowances.map(f=>({name:f.name, amountPerDay:f.amountPerDay})),
+                    bonus: calc.bonus,
+                    bonusDetails: state.bonusItems[emp.id] || [],
+                    leaveDays: { ...leave },
+                    leaveDeduct: calc.deductLeave,
+                    deductions: { 
+                        labor: manualLabor, 
+                        health: manualHealth,
+                        pension: calc.pensionSelf
+                    },
+                    gross: calc.gross,
+                    net: calc.gross - manualLabor - manualHealth - calc.pensionSelf,
+                    note
+                });
+            });
+            saveData();
+            alert(`${month} 薪資資料已存檔`);
+            // 清空表單
+            document.getElementById('payMonth').value = '';
+            document.getElementById('payDate').value = '';
+            state.leaveHistory = {};
+            state.employees.forEach(e => state.leaveHistory[e.id] = { 事: 0, 病: 0, 特: 0 });
+            saveData();
+            renderPayrollList();
+        }
+
+        function renderRecords() {
+            const body = document.getElementById('recordsBody');
+            if (!body) return;
+            const filterMonth = document.getElementById('recordsFilterMonth')?.value.trim() || '';
+            const filterName = document.getElementById('recordsFilterName')?.value.trim().toLowerCase() || '';
+            const filterNote = document.getElementById('recordsFilterNote')?.value.trim().toLowerCase() || '';
+            
+            let records = state.records || [];
+            if (filterMonth) {
+                records = records.filter(r => r.month.startsWith(filterMonth));
+            }
+            if (filterName) {
+                records = records.filter(r => r.empName.toLowerCase().includes(filterName));
+            }
+            if (filterNote) {
+                records = records.filter(r => (r.note || '').toLowerCase().includes(filterNote));
+            }
+            
+            const sortedRecords = [...records].sort((a,b) => b.month.localeCompare(a.month));
+            body.innerHTML = sortedRecords.map(r => {
+                const bonusText = r.bonusDetails?.map(b => `• ${b.name}: ${b.amount}`).join('\n') || '無';
+                const fixedText = r.fixedAllowances?.map(f => `• ${f.name}: ${f.amountPerDay} x ${r.workdays} = ${((f.amountPerDay||0)*(r.workdays||0)).toLocaleString()}`).join('\n') || '無';
+                const expenseText = [];
+                if (r.mealExpense) expenseText.push(`餐費扣除：${r.mealExpense.toLocaleString()}`);
+                if (r.transportExpense) expenseText.push(`交通費扣除：${r.transportExpense.toLocaleString()}`);
+                const details = `加班/獎金：\n${bonusText}\n\n固定津貼：\n${fixedText}${expenseText.length ? '\n\n' + expenseText.join('\n') : ''}`;
+                
+                // 檢查是否有薪資調整記錄
+                const emp = state.employees.find(e => e.id === r.empId);
+                let salaryNote = '';
+                if (emp && emp.salaryHistory && emp.salaryHistory.length > 0) {
+                    const recordDate = new Date(r.month + '-01');
+                    const adjustments = emp.salaryHistory.filter(adj => {
+                        const adjDate = new Date(adj.date);
+                        return adjDate.getFullYear() === recordDate.getFullYear() && 
+                               adjDate.getMonth() === recordDate.getMonth();
+                    });
+                    if (adjustments.length > 0) {
+                        salaryNote = `💰 調薪: ${adjustments.map(adj => `${adj.amount.toLocaleString()} (${adj.note || '無備註'})`).join(', ')}\n`;
+                    }
+                }
+                
+                const fullNote = salaryNote + (r.note || '');
+                
+                return `<tr>
+                    <td>${r.month}</td>
+                    <td>${r.empName}</td>
+                    <td>${r.baseSalary.toLocaleString()}</td>
+                    <td class="text-sm">${r.bonus > 0 ? r.bonus.toLocaleString() : '-'}</td>
+                    <td class="text-xs whitespace-pre-wrap">${details}</td>
+                    <td>${Math.round(r.gross).toLocaleString()}</td>
+                    <td>${(r.deductions.labor || 0).toLocaleString()}</td>
+                    <td>${(r.deductions.health || 0).toLocaleString()}</td>
+                    <td>${(r.deductions.pension || 0).toLocaleString()}</td>
+                    <td class="font-bold text-blue-600">${Math.round(r.net).toLocaleString()}</td>
+                    <td>${r.workdays || 0}</td>
+                    <td class="text-xs text-slate-500">${fullNote || '-'}</td>
+                    <td>
+                        <button onclick="printPayrollSlip(${r.id})" class="text-green-600 hover:underline mr-2">🖨️ 列印薪資條</button>
+                        <button onclick="editRecord(${r.id})" class="text-blue-500 hover:underline mr-2">編輯</button>
+                        <button onclick="deleteRecord(${r.id})" class="text-red-500 hover:underline">刪除</button>
+                    </td>
+                </tr>`;
+            }).join('');
+        }
+
+
+        function deleteRecord(id) {
+            if (confirm('確定刪除此筆紀錄？')) {
+                state.records = state.records.filter(r => r.id !== id);
+                saveData();
+                renderRecords();
+            }
+        }
+
+        // open a modal to edit a saved record
+        let currentEditingRecordId = null;
+        let currentRecordBonusItems = [];
+
+        function editRecord(id) {
+            openRecordModal(id);
+        }
+
+        function openRecordModal(id) {
+            const rec = state.records.find(r => r.id === id);
+            if (!rec) return;
+            currentEditingRecordId = id;
+            // populate fields
+            document.getElementById('recMonth').value = rec.month;
+            document.getElementById('recPayDate').value = rec.payDate;
+            const empSelect = document.getElementById('recEmpSelect');
+            empSelect.innerHTML = state.employees.map(e => 
+                `<option value="${e.id}" ${e.name === rec.empName ? 'selected' : ''}>${e.name}</option>`
+            ).join('');
+            document.getElementById('recWorkdays').value = rec.workdays || 0;
+            document.getElementById('recNote').value = rec.note || '';
+            document.getElementById('recLvF').value = (rec.leaveDays && rec.leaveDays.事) || 0;
+            document.getElementById('recLvS').value = (rec.leaveDays && rec.leaveDays.病) || 0;
+            document.getElementById('recLvSp').value = (rec.leaveDays && rec.leaveDays.特) || 0;
+            document.getElementById('recMealExpense').value = parseFloat(rec.mealExpense) || 0;
+            document.getElementById('recTransportExpense').value = parseFloat(rec.transportExpense) || 0;
+            // deduction fields
+            document.getElementById('recDeductLabor').value = (rec.deductions && rec.deductions.labor) || 0;
+            document.getElementById('recDeductHealth').value = (rec.deductions && rec.deductions.health) || 0;
+            currentRecordBonusItems = rec.bonusDetails ? JSON.parse(JSON.stringify(rec.bonusDetails)) : [];
+            renderRecordBonusEditor();
+            document.getElementById('recordModal').classList.remove('hidden');
+        }
+
+        function closeRecordModal() {
+            document.getElementById('recordModal').classList.add('hidden');
+        }
+
+        function renderRecordBonusEditor() {
+            const container = document.getElementById('recBonusEditor');
+            if (!container) return;
+            container.innerHTML = currentRecordBonusItems.map((b, i) => `
+                <div class="flex gap-2 items-center">
+                    <input type="text" value="${b.name}" placeholder="名稱"
+                           onchange="updateRecordBonusItem(${i}, 'name', this.value)" class="flex-1 border p-1" />
+                    <input type="number" value="${b.amount}" placeholder="金額"
+                           onchange="updateRecordBonusItem(${i}, 'amount', this.value)" class="w-24 border p-1" />
+                    <button onclick="removeRecordBonusItem(${i})" class="text-red-500">刪除</button>
+                </div>
+            `).join('');
+        }
+
+        function addRecordBonusItem() {
+            currentRecordBonusItems.push({ name: '', amount: 0 });
+            renderRecordBonusEditor();
+        }
+
+        function updateRecordBonusItem(idx, field, value) {
+            if (!currentRecordBonusItems[idx]) return;
+            if (field === 'amount') {
+                currentRecordBonusItems[idx][field] = parseFloat(value) || 0;
+            } else {
+                currentRecordBonusItems[idx][field] = value;
+            }
+        }
+
+        function removeRecordBonusItem(idx) {
+            currentRecordBonusItems.splice(idx, 1);
+            renderRecordBonusEditor();
+        }
+
+        function saveRecordModal() {
+            const rec = state.records.find(r => r.id === currentEditingRecordId);
+            if (!rec) return;
+            rec.month = document.getElementById('recMonth').value;
+            rec.payDate = document.getElementById('recPayDate').value;
+            const empId = parseInt(document.getElementById('recEmpSelect').value);
+            const emp = state.employees.find(e => e.id === empId);
+            if (emp) {
+                rec.empId = emp.id;
+                rec.empName = emp.name;
+                rec.baseSalary = emp.baseSalary;
+            }
+            rec.workdays = parseFloat(document.getElementById('recWorkdays').value) || 0;
+            rec.note = document.getElementById('recNote').value;
+            rec.leaveDays = {
+                事: parseFloat(document.getElementById('recLvF').value) || 0,
+                病: parseFloat(document.getElementById('recLvS').value) || 0,
+                特: parseFloat(document.getElementById('recLvSp').value) || 0
+            };
+            rec.mealExpense = parseFloat(document.getElementById('recMealExpense').value) || 0;
+            rec.transportExpense = parseFloat(document.getElementById('recTransportExpense').value) || 0;
+            rec.bonusDetails = JSON.parse(JSON.stringify(currentRecordBonusItems));
+            // recalc numbers
+            const days = rec.workdays || 0;
+            const bonusSum = currentRecordBonusItems.reduce((s, b) => s + (b.amount || 0), 0);
+            let fixedTotal = 0;
+            state.settings.fixedAllowances.forEach(f => {
+                fixedTotal += (f.amountPerDay || 0) * days;
+            });
+            rec.bonus = bonusSum + fixedTotal;
+            const base = rec.baseSalary || (emp && emp.baseSalary) || 0;
+            const lvF = rec.leaveDays.事 || 0;
+            const lvS = rec.leaveDays.病 || 0;
+            const lvSp = rec.leaveDays.特 || 0;
+            const daily = base / 30;
+            const deductFact = lvF * daily * (parseInt(state.settings.leaveFact) || 1);
+            const deductSick = lvS * daily * (parseInt(state.settings.leaveSick) || 0.5);
+            const deductSpecial = lvSp * daily * (parseInt(state.settings.leaveSpecial) || 0);
+            rec.leaveDeduct = deductFact + deductSick + deductSpecial;
+            // calculate default deductions
+            let laborSelf = emp ? Math.round(emp.laborLevel * (state.settings.rateLabor / 100) * 0.2) : 0;
+            let healthSelf = emp ? Math.round(emp.healthLevel * (state.settings.rateHealth / 100) * 0.3) : 0;
+            const pensionSelf = emp ? Math.round(base * (emp.pensionSelfRate / 100)) : 0;
+            // override with manual values if provided
+            const manualLabor = parseFloat(document.getElementById('recDeductLabor')?.value) || 0;
+            const manualHealth = parseFloat(document.getElementById('recDeductHealth')?.value) || 0;
+            if (!isNaN(manualLabor) && manualLabor >= 0) laborSelf = manualLabor;
+            if (!isNaN(manualHealth) && manualHealth >= 0) healthSelf = manualHealth;
+            rec.deductions = { labor: laborSelf, health: healthSelf, pension: pensionSelf };
+            const expenseDeduct = (rec.mealExpense || 0) + (rec.transportExpense || 0);
+            rec.gross = base + rec.bonus - rec.leaveDeduct - expenseDeduct;
+            rec.net = rec.gross - laborSelf - healthSelf - pensionSelf;
+            saveData();
+            closeRecordModal();
+            renderRecords();
+        }
+
+        // --- Export Functions ---
+        function exportPayrollToExcel() {
+            const data = state.records.map(r => ({
+                "年月": r.month,
+                "姓名": r.empName,
+                "本薪": r.baseSalary,
+                "獎金/津貼": r.bonus,
+                "明細": (r.bonusDetails||[]).map(b=>b.name+ ':'+b.amount).join('; ') +
+                          (r.fixedAllowances?.length ? '\n' + r.fixedAllowances.map(f=>`${f.name}@${f.amountPerDay}x${r.workdays}`).join('; ') : ''),
+                "固定津貼總額": (r.fixedAllowances||[]).reduce((s,f)=>s + ((f.amountPerDay||0)*(r.workdays||0)),0),
+                "固定津貼明細": (r.fixedAllowances||[]).map(f=> `${f.name}: ${f.amountPerDay} x ${r.workdays} = ${( (f.amountPerDay||0)*(r.workdays||0) ).toLocaleString()}`).join('; '),
+                "出勤天數": r.workdays || 0,
+                "餐費扣除": r.mealExpense || 0,
+                "交通費扣除": r.transportExpense || 0,
+                "請假扣薪": Math.round(r.leaveDeduct || 0),
+                "應發總額": r.gross,
+                "勞保自付": r.deductions.labor,
+                "健保自付": r.deductions.health,
+                "勞退自付": r.deductions.pension || 0,
+                "實發金額": r.net,
+                "發薪日": r.payDate,
+                "備註": r.note
+            }));
+            const ws = XLSX.utils.json_to_sheet(data);
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, ws, "薪資支出紀錄");
+            XLSX.writeFile(wb, `薪資總表_${new Date().toISOString().split('T')[0]}.xlsx`);
+        }
+
+        function exportIndividualPayrolls() {
+            const month = document.getElementById('recordsFilterMonth')?.value;
+            if (!month) return alert('請先選擇年月 (例: 2025-02) 作為匯出條件');
+            const wb = XLSX.utils.book_new();
+            const employees = Array.isArray(state.employees) ? state.employees : [];
+            const activeEmps = employees.filter(e => (e.status || '在職') === '在職');
+            activeEmps.forEach(emp => {
+                const rec = (state.records || []).find(r => r.empId === emp.id && r.month.startsWith(month));
+                if (rec) {
+                    const data = [{
+                        '年月': rec.month,
+                        '姓名': rec.empName,
+                        '本薪': rec.baseSalary,
+                        '獎金/津貼': rec.bonus,
+                        '明細': (rec.bonusDetails||[]).map(b=>b.name+ ':'+b.amount).join('; ') + (rec.fixedAllowances?.length ? '\n' + rec.fixedAllowances.map(f=>`${f.name}@${f.amountPerDay}x${rec.workdays}`).join('; ') : ''),
+                        '固定津貼總額': (rec.fixedAllowances||[]).reduce((s,f)=>s + ((f.amountPerDay||0)*(rec.workdays||0)),0),
+                        '出勤天數': rec.workdays || 0,
+                        '餐費扣除': rec.mealExpense || 0,
+                        '交通費扣除': rec.transportExpense || 0,
+                        '請假扣薪': Math.round(rec.leaveDeduct || 0),
+                        '應發總額': rec.gross,
+                        '勞保自付': rec.deductions.labor,
+                        '健保自付': rec.deductions.health,
+                        '勞退自付': rec.deductions.pension || 0,
+                        '實發金額': rec.net,
+                        '發薪日': rec.payDate,
+                        '備註': rec.note || ''
+                    }];
+                    const sheetName = `${emp.name}_${emp.id}`.slice(0,30);
+                    const ws = XLSX.utils.json_to_sheet(data);
+                    XLSX.utils.book_append_sheet(wb, ws, sheetName);
+                } else {
+                    const sheetName = `${emp.name}_${emp.id}`.slice(0,30);
+                    const ws = XLSX.utils.json_to_sheet([{ '備註': '無薪資紀錄' }]);
+                    XLSX.utils.book_append_sheet(wb, ws, sheetName);
+                }
+            });
+            XLSX.writeFile(wb, `${month}_在職員工薪資單.xlsx`);
+        }
+
+        function generateAnnualReport() {
+            updateSettingsFromUI();
+            const year = document.getElementById('reportYear').value;
+            const yearRecords = state.records.filter(r => r.month.startsWith(year));
+            
+            let totalGross = 0;
+            let companyCost = 0;
+            let coLaborTotal = 0;
+            let coHealthTotal = 0;
+            let coPensionTotal = 0;
+
+            yearRecords.forEach(r => {
+                totalGross += r.gross;
+                const emp = state.employees.find(e => e.id === r.empId) || {laborLevel: 30300, healthLevel: 30300};
+                const coLabor = emp.laborLevel * (state.settings.rateLabor/100) * 0.7;
+                const coHealth = emp.healthLevel * (state.settings.rateHealth/100) * 0.6;
+                const coPension = emp.laborLevel * (state.settings.ratePension/100);
+                coLaborTotal += coLabor;
+                coHealthTotal += coHealth;
+                coPensionTotal += coPension;
+                companyCost += (coLabor + coHealth + coPension);
+            });
+
+            document.getElementById('statSalary').innerText = `$ ${Math.round(totalGross).toLocaleString()}`;
+            // compute bill totals for selected year
+            const billTotals = { labor: 0, health: 0, pension: 0 };
+            if (Array.isArray(state.bills)) {
+                state.bills.forEach(b => {
+                    if (!b.date) return;
+                    if (String(b.date).startsWith(year)) {
+                        if (b.type === 'labor') billTotals.labor += (b.amount || 0);
+                        if (b.type === 'health') billTotals.health += (b.amount || 0);
+                        if (b.type === 'pension') billTotals.pension += (b.amount || 0);
+                    }
+                });
+            }
+
+            const laborDiff = Math.round(coLaborTotal) - Math.round(billTotals.labor || 0);
+            const healthDiff = Math.round(coHealthTotal) - Math.round(billTotals.health || 0);
+            const pensionDiff = Math.round(coPensionTotal) - Math.round(billTotals.pension || 0);
+
+            document.getElementById('statCompanyCostDetail').innerHTML =
+                `勞保: 估計 $ ${Math.round(coLaborTotal).toLocaleString()} / 帳單 $ ${Math.round(billTotals.labor).toLocaleString()} (差額 $ ${Math.abs(laborDiff).toLocaleString()})<br>` +
+                `健保: 估計 $ ${Math.round(coHealthTotal).toLocaleString()} / 帳單 $ ${Math.round(billTotals.health).toLocaleString()} (差額 $ ${Math.abs(healthDiff).toLocaleString()})<br>` +
+                `勞退: 估計 $ ${Math.round(coPensionTotal).toLocaleString()} / 帳單 $ ${Math.round(billTotals.pension).toLocaleString()} (差額 $ ${Math.abs(pensionDiff).toLocaleString()})`;
+            document.getElementById('statEmpCount').innerText = `${state.employees.length} 人`;
+
+            // include bill totals in the bill list container
+            renderBills();
+        }
+
+        function exportAnnualExcel() {
+            const year = document.getElementById('reportYear').value;
+            const yearRecords = state.records.filter(r => r.month.startsWith(year));
+            
+            const summaryByEmp = {};
+            yearRecords.forEach(r => {
+                if (!summaryByEmp[r.empName]) {
+                    summaryByEmp[r.empName] = {
+                        姓名: r.empName,
+                        本薪總計: 0,
+                        獎金津貼: 0,
+                        出勤天數總計: 0,
+                        請假扣薪: 0,
+                        應發總額: 0,
+                        勞保自付: 0,
+                        健保自付: 0,
+                        勞退自付: 0,
+                        實發總額: 0,
+                        月份數: 0
+                    };
+                }
+                summaryByEmp[r.empName].本薪總計 += r.baseSalary;
+                summaryByEmp[r.empName].獎金津貼 += r.bonus;
+                summaryByEmp[r.empName].出勤天數總計 += r.workdays || 0;
+                summaryByEmp[r.empName].請假扣薪 += r.leaveDeduct || 0;
+                summaryByEmp[r.empName].應發總額 += r.gross;
+                summaryByEmp[r.empName].勞保自付 += r.deductions.labor;
+                summaryByEmp[r.empName].健保自付 += r.deductions.health;
+                summaryByEmp[r.empName].勞退自付 += r.deductions.pension || 0;
+                summaryByEmp[r.empName].實發總額 += r.net;
+                summaryByEmp[r.empName].月份數 += 1;
+            });
+
+            const data = Object.values(summaryByEmp);
+            const ws = XLSX.utils.json_to_sheet(data);
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, ws, `${year}年度總表`);
+            XLSX.writeFile(wb, `${year}年度薪資總表.xlsx`);
+        }
+
+        // --- Backup & Restore ---
+        function exportBackup() {
+            const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(state, null, 2));
+            const downloadAnchorNode = document.createElement('a');
+            downloadAnchorNode.setAttribute("href", dataStr);
+            downloadAnchorNode.setAttribute("download", "payroll_backup_" + new Date().toISOString().split('T')[0] + ".json");
+            document.body.appendChild(downloadAnchorNode);
+            downloadAnchorNode.click();
+            downloadAnchorNode.remove();
+        }
+
+        function importBackup(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                try {
+                    const imported = JSON.parse(e.target.result);
+                    if (confirm("這將覆蓋現有所有資料，確定嗎？")) {
+                        state = imported;
+                        saveData();
+                        location.reload();
+                    }
+                } catch (err) {
+                    alert("檔案格式錯誤");
+                }
+            };
+            reader.readAsText(file);
+        }
+
+        // --- Bill management for 勞保/健保/勞退 ---
+        state.bills = state.bills || [];
+
+        function addBill() {
+            const type = document.getElementById('billType').value;
+            const date = document.getElementById('billDate').value;
+            const amount = parseFloat(document.getElementById('billAmount').value) || 0;
+            const note = document.getElementById('billNote').value || '';
+            state.bills.push({ id: Date.now() + Math.random(), type, date, amount, note });
+            saveData();
+            renderBills();
+        }
+
+        function renderBills() {
+            const container = document.getElementById('reportBillList');
+            if (!container) return;
+            if (!Array.isArray(state.bills)) state.bills = [];
+            if (state.bills.length === 0) {
+                container.innerHTML = '<div class="text-slate-500">尚無帳單紀錄</div>';
+                return;
+            }
+            const rows = state.bills.map(b => {
+                return `<div class="flex items-center justify-between border-b py-2">
+                    <div>
+                        <div class="text-sm font-medium">${b.type} - ${b.date}</div>
+                        <div class="text-xs text-slate-600">${b.note}</div>
+                    </div>
+                    <div class="text-right flex items-center gap-2">
+                        <input type="number" value="${b.amount || 0}" onchange="updateBillAmount('${b.id}', this.value)" class="p-1 border w-36 text-right" />
+                        <button onclick="deleteBill('${b.id}')" class="text-red-500 text-sm">刪除</button>
+                    </div>
+                </div>`;
+            }).join('');
+            container.innerHTML = rows;
+        }
+
+        function deleteBill(id) {
+            state.bills = state.bills.filter(b => String(b.id) !== String(id));
+            saveData();
+            renderBills();
+        }
+
+        function updateBillAmount(id, value) {
+            const bill = state.bills.find(b => String(b.id) === String(id));
+            if (!bill) return;
+            bill.amount = parseFloat(value) || 0;
+            saveData();
+            // refresh report to reflect updated totals
+            try { generateAnnualReport(); } catch (e) { /* ignore if report not present */ }
+            renderBills();
+        }
+
+        // --- Fix Salary Data ---
+        function fixSalaryData() {
+            if (!confirm('此操作將重新計算所有歷史薪資記錄的薪資金額，確保使用正確的調薪數據。\n\n確定要繼續嗎？')) {
+                return;
+            }
+
+            let fixedCount = 0;
+            state.records.forEach(record => {
+                const emp = state.employees.find(e => e.id === record.empId);
+                if (emp) {
+                    // 重新計算該月份應用的薪資金額
+                    const applicableSalary = getSalaryForDate(emp, record.month + '-01');
+                    
+                    // 如果記錄中的薪資與計算出的不同，則更新
+                    if (record.baseSalary !== applicableSalary) {
+                        console.log(`修復 ${record.empName} ${record.month}: ${record.baseSalary} → ${applicableSalary}`);
+                        const oldSalary = record.baseSalary;
+                        record.baseSalary = applicableSalary;
+                        
+                        // 只重新計算與薪資相關的項目，保持記錄中原有的獎金和津貼
+                        const salaryDiff = applicableSalary - oldSalary;
+                        record.gross = (record.gross || 0) + salaryDiff;
+                        record.net = (record.net || 0) + salaryDiff;
+                        
+                        // 如果有勞退自提，也需要重新計算
+                        if (emp.pensionSelfRate > 0) {
+                            const oldPension = Math.round(oldSalary * (emp.pensionSelfRate / 100));
+                            const newPension = Math.round(applicableSalary * (emp.pensionSelfRate / 100));
+                            const pensionDiff = newPension - oldPension;
+                            
+                            record.deductions = record.deductions || {};
+                            record.deductions.pension = (record.deductions.pension || 0) + pensionDiff;
+                            record.net -= pensionDiff;
+                        }
+                        
+                        fixedCount++;
+                    }
+                }
+            });
+
+            if (fixedCount > 0) {
+                saveData();
+                renderRecords();
+                alert(`已修復 ${fixedCount} 筆薪資記錄`);
+            } else {
+                alert('所有薪資記錄都是最新的，無需修復');
+            }
+        }
+
+        // --- Print Payroll Slip ---
+        function printPayrollSlip(recordId) {
+            const record = state.records.find(r => r.id === recordId);
+            if (!record) return alert('找不到薪資記錄');
+
+            const emp = state.employees.find(e => e.id === record.empId);
+            if (!emp) return alert('找不到員工資料');
+
+            const preGross = (Number(record.baseSalary) || 0) + (Number(record.bonus) || 0);
+
+            // 生成薪資條HTML內容
+            const slipHtml = `
+                <div style="font-family: 'Microsoft JhengHei', 'Noto Sans TC', sans-serif; margin: 0; padding: 20px; background: white;">
+                    <div style="text-align: center; border-bottom: 2px solid #333; padding-bottom: 10px; margin-bottom: 20px;">
+                        <div style="font-size: 24px; font-weight: bold; margin-bottom: 5px;">企業薪資管理系統</div>
+                        <div style="font-size: 18px; color: #666;">薪資條</div>
+                    </div>
+
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 20px;">
+                        <div style="flex: 1;">
+                            <h3 style="margin-bottom: 10px; font-size: 16px; border-bottom: 1px solid #ddd; padding-bottom: 5px;">員工資訊</h3>
+                            <div style="display: flex; margin-bottom: 5px;"><span style="width: 120px; font-weight: bold;">員工姓名：</span><span>${record.empName}</span></div>
+                            <div style="display: flex; margin-bottom: 5px;"><span style="width: 120px; font-weight: bold;">所屬部門：</span><span>${emp.department || '-'}</span></div>
+                            <div style="display: flex; margin-bottom: 5px;"><span style="width: 120px; font-weight: bold;">職稱：</span><span>${emp.position || '-'}</span></div>
+                            <div style="display: flex; margin-bottom: 5px;"><span style="width: 120px; font-weight: bold;">員工編號：</span><span>${emp.employeeCode || emp.id}</span></div>
+                        </div>
+                        <div style="flex: 1;">
+                            <h3 style="margin-bottom: 10px; font-size: 16px; border-bottom: 1px solid #ddd; padding-bottom: 5px;">薪資期間</h3>
+                            <div style="display: flex; margin-bottom: 5px;"><span style="width: 120px; font-weight: bold;">薪資月份：</span><span>${record.month}</span></div>
+                            <div style="display: flex; margin-bottom: 5px;"><span style="width: 120px; font-weight: bold;">發薪日期：</span><span>${record.payDate}</span></div>
+                            <div style="display: flex; margin-bottom: 5px;"><span style="width: 120px; font-weight: bold;">出勤天數：</span><span>${record.workdays} 天</span></div>
+                            <div style="display: flex; margin-bottom: 5px;"><span style="width: 120px; font-weight: bold;">狀態：</span><span>${emp.status || '在職'}</span></div>
+                        </div>
+                    </div>
+
+                    <table style="width: 100%; border-collapse: collapse; margin-top: 20px; border: 1px solid #ddd;">
+                        <thead>
+                            <tr style="background-color: #f5f5f5;">
+                                <th style="border: 1px solid #ddd; padding: 8px; text-align: left; font-weight: bold;">項目</th>
+                                <th style="border: 1px solid #ddd; padding: 8px; text-align: left; font-weight: bold;">金額</th>
+                                <th style="border: 1px solid #ddd; padding: 8px; text-align: left; font-weight: bold;">備註</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td style="border: 1px solid #ddd; padding: 8px;">本薪</td>
+                                <td style="border: 1px solid #ddd; padding: 8px;">$${record.baseSalary.toLocaleString()}</td>
+                                <td style="border: 1px solid #ddd; padding: 8px;">基本薪資</td>
+                            </tr>
+                            ${record.bonus > 0 ? `
+                            <tr>
+                                <td style="border: 1px solid #ddd; padding: 8px;">獎金/加班費</td>
+                                <td style="border: 1px solid #ddd; padding: 8px;">$${record.bonus.toLocaleString()}</td>
+                                <td style="border: 1px solid #ddd; padding: 8px;">${record.bonusDetails && Array.isArray(record.bonusDetails) ? record.bonusDetails.map(b => b.name + ': $' + (b.amount || 0).toLocaleString()).join('<br>') : '獎金明細'}</td>
+                            </tr>
+                            ` : ''}
+                            ${record.fixedAllowances && record.fixedAllowances.length > 0 ? record.fixedAllowances.map(f => `
+                            <tr>
+                                <td style="border: 1px solid #ddd; padding: 8px;">${f.name}</td>
+                                <td style="border: 1px solid #ddd; padding: 8px;">$${(f.amountPerDay * record.workdays).toLocaleString()}</td>
+                                <td style="border: 1px solid #ddd; padding: 8px;">${f.name} (${f.amountPerDay}/天 × ${record.workdays}天)</td>
+                            </tr>
+                            `).join('') : ''}
+                            ${record.leaveDeduct > 0 ? `
+                            <tr>
+                                <td style="border: 1px solid #ddd; padding: 8px;">請假扣薪</td>
+                                <td style="border: 1px solid #ddd; padding: 8px;">-$${record.leaveDeduct.toLocaleString()}</td>
+                                <td style="border: 1px solid #ddd; padding: 8px;">請假扣款</td>
+                            </tr>
+                            ` : ''}
+                            <tr style="background-color: #e8f4f8; font-weight: bold;">
+                                <td style="border: 1px solid #ddd; padding: 8px;">應領總額</td>
+                                <td style="border: 1px solid #ddd; padding: 8px;">$${preGross.toLocaleString()}</td>
+                                <td style="border: 1px solid #ddd; padding: 8px;"></td>
+                            </tr>
+                            ${record.mealExpense > 0 ? `
+                            <tr>
+                                <td style="border: 1px solid #ddd; padding: 8px;">餐費扣除</td>
+                                <td style="border: 1px solid #ddd; padding: 8px;">-$${parseFloat(record.mealExpense || 0).toLocaleString()}</td>
+                                <td style="border: 1px solid #ddd; padding: 8px;">實際扣除餐費</td>
+                            </tr>
+                            ` : ''}
+                            ${record.transportExpense > 0 ? `
+                            <tr>
+                                <td style="border: 1px solid #ddd; padding: 8px;">交通費扣除</td>
+                                <td style="border: 1px solid #ddd; padding: 8px;">-$${parseFloat(record.transportExpense || 0).toLocaleString()}</td>
+                                <td style="border: 1px solid #ddd; padding: 8px;">實際扣除交通費</td>
+                            </tr>
+                            ` : ''}
+                            ${record.deductions.labor > 0 ? `
+                            <tr>
+                                <td style="border: 1px solid #ddd; padding: 8px;">勞保費</td>
+                                <td style="border: 1px solid #ddd; padding: 8px;">-$${record.deductions.labor.toLocaleString()}</td>
+                                <td style="border: 1px solid #ddd; padding: 8px;">勞工保險自付額</td>
+                            </tr>
+                            ` : ''}
+                            ${record.deductions.health > 0 ? `
+                            <tr>
+                                <td style="border: 1px solid #ddd; padding: 8px;">健保費</td>
+                                <td style="border: 1px solid #ddd; padding: 8px;">-$${record.deductions.health.toLocaleString()}</td>
+                                <td style="border: 1px solid #ddd; padding: 8px;">健康保險自付額</td>
+                            </tr>
+                            ` : ''}
+                            ${record.deductions.pension > 0 ? `
+                            <tr>
+                                <td style="border: 1px solid #ddd; padding: 8px;">勞退金</td>
+                                <td style="border: 1px solid #ddd; padding: 8px;">-$${record.deductions.pension.toLocaleString()}</td>
+                                <td style="border: 1px solid #ddd; padding: 8px;">勞工退休金自提</td>
+                            </tr>
+                            ` : ''}
+                            <tr style="background-color: #e8f4f8; font-weight: bold;">
+                                <td style="border: 1px solid #ddd; padding: 8px;">實領金額</td>
+                                <td style="border: 1px solid #ddd; padding: 8px;">$${record.net.toLocaleString()}</td>
+                                <td style="border: 1px solid #ddd; padding: 8px;"></td>
+                            </tr>
+                        </tbody>
+                    </table>
+
+                    ${record.note ? `
+                    <div style="margin-top: 20px; padding: 10px; background-color: #f9f9f9; border-left: 4px solid #ddd;">
+                        <strong>備註：</strong> ${record.note}
+                    </div>
+                    ` : ''}
+
+                    <div style="margin-top: 30px; text-align: center; font-size: 12px; color: #666;">
+                        <p>本薪資條由系統自動生成，如有疑問請聯繫人事部門</p>
+                        <p>列印日期：${new Date().toLocaleDateString('zh-TW')}</p>
+                    </div>
+                </div>
+            `;
+
+            // 顯示模態框
+            document.getElementById('slipContent').innerHTML = slipHtml;
+            document.getElementById('printSlipModal').classList.remove('hidden');
+        }
+
+        function closePrintSlipModal() {
+            document.getElementById('printSlipModal').classList.add('hidden');
+        }
+    </script>
+</body>
+</html>
